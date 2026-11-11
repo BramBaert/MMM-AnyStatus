@@ -185,9 +185,9 @@ the container itself.
 | `docker_status` | containers not fine | above | crit 1 | Docker API access | 4 |
 | `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
 | `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
-| `result_file` *(proposed)* | as the file says | | | | 4 |
+| `result_file` | as the file says | | | | 4 |
 | `mqtt` | age of the last message, a value from it, or a level it names | above | none | `mqtt` extra, a broker | 4 |
-| `system` *(proposed)* | temperature, load, memory used | above | none | Linux | 4 |
+| `system` | temperature, load, memory used | above | none | Linux | 4 |
 | `systemd` *(proposed)* | | | | systemd on the host | later |
 | `dns` *(proposed)* | lookup time, ms | above | none; no answer is `crit` | | later |
 
@@ -469,7 +469,7 @@ limits, or `anystatus.Observation(level=..., summary=..., value=..., unit=...)` 
 It may also be `async`. An exception is a failure; its type, not its message, goes into the summary (message text can
 contain secrets). It runs in a worker thread with the usual [timeout rules](#scheduling).
 
-### `result_file` (proposed)
+### `result_file`
 
 ```toml
 [[check]]
@@ -579,7 +579,7 @@ Rules:
 - **Later:** wildcard topics (`sensors/+/heartbeat`), where the value is the number of silent devices and the
   summary names them.
 
-### `system` (proposed, step 4)
+### `system`
 
 ```toml
 [[check]]
