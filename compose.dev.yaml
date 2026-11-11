@@ -19,11 +19,33 @@ services:
     volumes:
       - ./examples/hand-written:/demo:ro
 
+  # The real checker, running checker/examples/config.toml (ping localhost, two sql_age checks on a SQLite file that
+  # update_demo_db.py keeps fresh, and a custom Python function). It listens on 0.0.0.0 inside the compose network only
+  # (no ports published); the examples are copied to /tmp so the checker's repo mount can stay read-only.
+  #   docker compose -f compose.dev.yaml up -d checker
+  checker:
+    image: ghcr.io/astral-sh/uv:0.13.7-python3.14-alpine
+    working_dir: /tmp
+    environment:
+      UV_PROJECT_ENVIRONMENT: /tmp/venv
+      UV_CACHE_DIR: /tmp/uv-cache
+      UV_LINK_MODE: copy
+    volumes:
+      - ./checker:/checker:ro
+    command:
+      - sh
+      - -c
+      - |
+        cp -r /checker/examples /tmp/ex
+        sed -i 's/127.0.0.1:8099/0.0.0.0:8099/' /tmp/ex/config.toml
+        python /tmp/ex/update_demo_db.py --loop > /dev/null &
+        sleep 1
+        exec uv run --frozen --no-dev --project /checker anystatus-checker run /tmp/ex/config.toml
   # Real MagicMirror, server only. Open http://localhost:8080
   #   docker compose -f compose.dev.yaml up magicmirror
   magicmirror:
     image: karsten13/magicmirror:alpine-v2.38.0 # alpine tags run server only
-    depends_on: [demo]
+    depends_on: [demo, checker]
     ports:
       - "8080:8080"
     environment:

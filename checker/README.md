@@ -27,7 +27,7 @@ example config has four checks:
 | `demo.nightly` | `sql_age` on data that is 3 days old on purpose: red. The time has no offset, so `timezone` says which clock wrote it |
 | `custom.disk` | the `python` type: your function (`examples/my_checks.py`) returns a number |
 
-Point the MagicMirror module at it: `checkerUrl: "http://127.0.0.1:8099/results"`.
+Point the MagicMirror module at it: `checkerUrl: "http://127.0.0.1:8099"`.
 
 To use it in your own project: `uv add mmm-anystatus-checker` (not on PyPI yet: `uv add ./checker` from a checkout),
 with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases.

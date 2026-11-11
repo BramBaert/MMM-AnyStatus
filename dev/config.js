@@ -1,4 +1,4 @@
-// MagicMirror config for development: server only, three module instances, two of them rotating through display states, fed by the demo server.
+// MagicMirror config for development: server only, four module instances: three fed by the demo server (two of them rotating through display states), one by the real checker.
 // The scenarios are in examples/hand-written/scenarios/; the demo server serves them at /scenario/<name>/results.
 const config = {
 	address: "0.0.0.0",
@@ -8,7 +8,7 @@ const config = {
 	timeFormat: 24,
 	units: "metric",
 
-	// Three instances, one per column, so that every column stays short (stacked instances overlapped on short screens).
+	// Three demo instances, one per column, so that every column stays short (stacked instances overlapped on short screens).
 	// Two of them rotate through scenarios (the demo server's /rotate/<name>,<name>,.../results, a new one every 20 s).
 	modules: [
 		{
@@ -28,6 +28,12 @@ const config = {
 			position: "top_right",
 			header: "Broken checker (rotating): how the module copes",
 			config: { checkerUrl: "http://demo:8099/rotate/invalid,empty,unsupported,unreachable", fetchInterval: 5 * 1000, maxItems: 6 },
+		},
+		{
+			module: "MMM-AnyStatus",
+			position: "bottom_center",
+			header: "Real checker (example config)",
+			config: { checkerUrl: "http://checker:8099", fetchInterval: 5 * 1000, maxItems: 6 },
 		},
 	],
 };
