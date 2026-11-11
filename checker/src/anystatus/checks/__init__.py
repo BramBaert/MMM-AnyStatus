@@ -7,6 +7,7 @@ from anystatus.checks import (  # noqa: F401  (registration)
     exec_cmd,
     file_age,
     http,
+    image_vulns,
     mqtt,
     ping,
     python_fn,
