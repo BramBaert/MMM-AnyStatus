@@ -253,7 +253,11 @@ status is `crit`** ("HTTP 503"), a connection that fails is `unknown`.
 - `value_is = "time"` accepts RFC 3339 strings and Unix seconds. A time without an offset is read as UTC unless
   `timezone = "Europe/Brussels"`.
 - TLS is verified; `verify_tls = false` is allowed but logged as a warning at startup.
-- Extra headers: a `headers` table; values ending in `_env` are read from the environment, like every other key.
+- Extra headers: a `headers` table. A key ending in `_env` takes its value from the environment, like every other
+  key (`X-Api-Key_env = "SYNC_KEY"` sends `X-Api-Key`).
+- **Redirects are not followed**: a `301` is `crit` ("HTTP 301"). Point `url` at the final address. This also keeps
+  credentials from travelling to a host the config doesn't name.
+- Credentials in the `url` itself are a config error, as for databases.
 
 ### `tls_expiry`
 
