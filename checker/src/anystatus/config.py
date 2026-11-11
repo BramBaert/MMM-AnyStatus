@@ -184,10 +184,11 @@ def _build_check(
     if check_cls is None:
         return None
 
-    warn_default, crit_default = check_cls.default_limits
-    warn = t.limit("warn", warn_default, check_cls.duration_limits)
-    crit = t.limit("crit", crit_default, check_cls.duration_limits)
-    worse: Worse = "below" if t.choice("worse", ("above", "below"), check_cls.worse) == "below" else "above"
+    traits = check_cls.traits(t)
+    warn_default, crit_default = traits.default_limits
+    warn = t.limit("warn", warn_default, traits.duration_limits)
+    crit = t.limit("crit", crit_default, traits.duration_limits)
+    worse: Worse = "below" if t.choice("worse", ("above", "below"), traits.worse) == "below" else "above"
     if warn is not None and crit is not None and (warn >= crit if worse == "above" else warn <= crit):
         order = "warn < crit" if worse == "above" else "warn > crit"
         t.error(
@@ -198,7 +199,7 @@ def _build_check(
         _check_template(
             t,
             summary,
-            GENERIC_PLACEHOLDERS | check_cls.placeholders | ({"age"} if check_cls.duration_limits else set()),
+            GENERIC_PLACEHOLDERS | traits.placeholders | ({"age"} if traits.duration_limits else set()),
         )
 
     check = check_cls.from_config(t)

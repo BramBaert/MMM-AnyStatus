@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 Level = Literal["ok", "warn", "crit", "unknown"]
 LEVELS: tuple[str, ...] = ("ok", "warn", "crit", "unknown")
@@ -55,7 +55,21 @@ class CheckFailure(Exception):
         self.detail = detail
 
 
-Outcome = Observation | Reading | Failure
+@dataclass(frozen=True)
+class Passthrough:
+    """Results that someone else already decided (`result_file`): served as they are, never judged or debounced, and
+    never re-stamped, so a job that stops writing still turns grey on time.
+
+    `entries` are the raw JSON values of the file's results (anything: they are validated when served, see
+    passthrough.py). `prefixed` is True for a document, whose result ids are served as `<check id>/<their id>`;
+    a single result is served under the check's own id.
+    """
+
+    entries: tuple[Any, ...]
+    prefixed: bool = False
+
+
+Outcome = Observation | Reading | Failure | Passthrough
 
 
 @dataclass(frozen=True)

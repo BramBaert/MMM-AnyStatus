@@ -5,6 +5,7 @@ from anystatus.checks import (  # noqa: F401  (registration)
     mqtt,
     ping,
     python_fn,
+    result_file,
     sql_age,
     sql_value,
     tcp,

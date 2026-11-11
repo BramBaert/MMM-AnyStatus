@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol
 
-from anystatus.model import Observation, Reading, Worse
+from anystatus.model import Observation, Passthrough, Reading, Worse
 from anystatus.table import Context, Table
 
 
@@ -21,6 +22,14 @@ class CheckMemory(Protocol):
 
     def save(self, data: dict[str, Any]) -> None:
         """Store `data`. Thread-safe: may be called from the check's own listener thread."""
+
+
+@dataclass(frozen=True)
+class Traits:
+    worse: Worse
+    duration_limits: bool
+    placeholders: frozenset[str]
+    default_limits: tuple[float | None, float | None]
 
 
 class Check(ABC):
@@ -37,6 +46,13 @@ class Check(ABC):
     default_limits: ClassVar[tuple[float | None, float | None]] = (None, None)
 
     @classmethod
+    def traits(cls, table: Table) -> Traits:
+        """What the config loader needs to know before `from_config`. Most types answer with the class variables
+        above; a type whose direction, units or default limits depend on its own keys (`disk`, `system`: the
+        `measure`) overrides this and peeks at `table.data` (validation is left to `from_config`)."""
+        return Traits(cls.worse, cls.duration_limits, cls.placeholders, cls.default_limits)
+
+    @classmethod
     @abstractmethod
     def from_config(cls, table: Table) -> Check:
         """Read the type's own keys from `table` (recording problems with table.error), and build the check."""
@@ -49,9 +65,10 @@ class Check(ABC):
         """Optional lifecycle: called once on shutdown."""
 
     @abstractmethod
-    def run(self, timeout: float) -> Observation | Reading:
+    def run(self, timeout: float) -> Observation | Reading | Passthrough:
         """Do the check. May block. Raise CheckFailure when it can't find out. Must give up within `timeout` seconds
-        where it can; a thread that doesn't is simply not started again (see docs/checker.md, Scheduling)."""
+        where it can; a thread that doesn't is simply not started again (see docs/checker.md, Scheduling).
+        Only `result_file` returns a Passthrough (results that are served as they are, see model.Passthrough)."""
 
 
 REGISTRY: dict[str, type[Check]] = {}

@@ -20,7 +20,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from anystatus.document import Snapshot, render_result
 from anystatus.errors import describe_exception, mask
 from anystatus.judge import judge, step
-from anystatus.model import CheckFailure, Core, Failure, Outcome, Reported
+from anystatus.model import CheckFailure, Core, Failure, Outcome, Passthrough, Reported
+from anystatus.passthrough import render_passthrough
 from anystatus.store import Store
 
 if TYPE_CHECKING:
@@ -148,6 +149,9 @@ class Slot:
     started: float = 0.0
     zombie: Handle | None = None  # a timed-out run whose thread is still alive
     runs: int = 0
+    # The results of a check that serves several (or someone else's) results as they are (Passthrough). While this
+    # is set, it is served instead of `served`; a later failure of the check clears it again.
+    passthrough: list[dict[str, Any]] | None = None
 
 
 class Scheduler:
@@ -246,7 +250,14 @@ class Scheduler:
         return all(slot.runs >= 1 for slot in self.slots)
 
     def results(self) -> list[dict[str, Any]]:
-        return [render_result(s.spec, s.served) for s in self.slots if s.served is not None]
+        """Every result to serve, in config order; a passthrough check contributes all of its results."""
+        out: list[dict[str, Any]] = []
+        for slot in self.slots:
+            if slot.passthrough is not None:
+                out.extend(slot.passthrough)
+            elif slot.served is not None:
+                out.append(render_result(slot.spec, slot.served))
+        return out
 
     def run_forever(self, stop: threading.Event, wake: threading.Event) -> None:
         while not stop.is_set():
@@ -269,6 +280,15 @@ class Scheduler:
 
     def _finish(self, slot: Slot, outcome: Outcome, ts: datetime) -> None:
         spec = slot.spec
+        if isinstance(outcome, Passthrough):
+            # Served as the file says: no judge, no debounce, no new ts, and nothing for the memory file (a restart
+            # simply reads the file again). The debounce state is dropped so that a later failure starts fresh.
+            slot.passthrough = render_passthrough(spec, outcome, ts)
+            slot.state = slot.served = None
+            slot.runs += 1
+            log.debug("%s: run finished: %d result(s) from the file", spec.id, len(slot.passthrough))
+            return
+        slot.passthrough = None
         previous = slot.served.core.level if slot.served else None
         core = judge(spec, outcome)
         reported = step(slot.state, core, ts, spec.confirm)

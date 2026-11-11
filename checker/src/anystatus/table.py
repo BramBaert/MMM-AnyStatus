@@ -118,6 +118,28 @@ class Table:
             return default
         return value
 
+    def raw(self, key: str) -> Any:
+        """The value as written, None when the key is not there. For a key whose shape the caller checks itself."""
+        value = self._take(key)
+        return None if value is _MISSING else value
+
+    def str_list(self, key: str) -> list[str] | None:
+        """A list of non-empty strings, None when the key is not there (or is not such a list: that is an error)."""
+        value = self._take(key)
+        if value is _MISSING:
+            return None
+        if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+            self.error(f'\'{key}\' must be a list of text values, such as ["a", "b"]')
+            return None
+        return list(value)
+
+    def path(self, key: str) -> str:
+        """A required path as text; a relative one is relative to the folder of the config file."""
+        text = self.req_str(key)
+        if not text:
+            return ""
+        return str(Path(text) if Path(text).is_absolute() else self.base_dir / text)
+
     def str_map(self, key: str) -> dict[str, str] | None:
         """A table of string -> string, None when the key is not there."""
         value = self._take(key)
