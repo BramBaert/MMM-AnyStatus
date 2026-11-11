@@ -1,4 +1,5 @@
-# The dev page's "Real checker": the example checks plus three mqtt checks against the compose `mosquitto` service.
+# The dev page's "Real checker": the example checks plus a system and a result_file check, and three mqtt checks against
+# the compose `mosquitto` service.
 # compose.dev.yaml copies this next to the other examples as /tmp/ex/config.toml (demo.sqlite, my_checks.py).
 
 [checker]
@@ -56,6 +57,24 @@ path = "."
 warn = 85
 crit = 95
 summary = "{value} % used"
+
+# system: reads /proc inside the container (load of the Docker VM, per CPU). Linux only; green on the dev page.
+[[check]]
+id = "system.load"
+type = "system"
+label = "Load (per CPU)"
+group = "system"
+measure = "load"
+warn = 1.5
+crit = 4
+
+# result_file: update_demo_db.py --loop rewrites demo_result.json every 20 s; its own ts and ttl are served as they are.
+[[check]]
+id = "demo.job"
+type = "result_file"
+label = "Demo job (a result file)"
+group = "demo"
+path = "demo_result.json"
 
 # mqtt: a heartbeat every 10 s, a retained Last Will, and a topic nobody publishes to.
 [[check]]

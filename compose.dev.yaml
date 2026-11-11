@@ -58,7 +58,7 @@ services:
       - sh
       - -c
       - |
-        cp -r /checker/examples /tmp/ex
+        mkdir -p /tmp/ex && cp -r /checker/examples/. /tmp/ex/
         cp /dev-checker.toml /tmp/ex/config.toml
         sed -i 's/127.0.0.1:8099/0.0.0.0:8099/' /tmp/ex/config.toml
         python /tmp/ex/update_demo_db.py --loop > /dev/null &
