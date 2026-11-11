@@ -313,6 +313,26 @@ test("arrange: system items stay cards when collapsing", () => {
 	assert.deepEqual(view.groups.map((g) => [g.group, g.count]), [["g", 4]]);
 });
 
+test("arrange: a collapsed group lists its members in card order, at most 4, then counts the rest", () => {
+	const items = [
+		item("warn", "w1", 1, "g"),
+		item("unknown", "u1", 1, "g"),
+		item("crit", "c1", 5, "g"),
+		item("crit", "c2", 9, "g"),
+		item("warn", "w2", 2, "g"),
+		item("warn", "w3", 3, "g"),
+		item("crit", "x", 1, "small"),
+	];
+	const view = S.arrange(items, 3);
+	const g = view.groups.find((x) => x.group === "g");
+	assert.deepEqual(g.members, [{ label: "c1", level: "crit" }, { label: "c2", level: "crit" }, { label: "u1", level: "unknown" }, { label: "w1", level: "warn" }]);
+	assert.equal(g.more, 2);
+	assert.equal(g.count, 6);
+	const small = view.groups.find((x) => x.group === "small");
+	assert.deepEqual(small.members, [{ label: "x", level: "crit" }]);
+	assert.equal(small.more, 0);
+});
+
 test("formatAge", () => {
 	const at = (ms) => S.formatAge(NOW - ms, NOW);
 	assert.equal(at(0), "<1 min");

@@ -69,6 +69,11 @@
 	font-size: 0.8em;
 	color: var(--color-text, #999);
 }
+/* Member names of a collapsed group, coloured by their own level. */
+.anystatus .as-name[data-level="crit"] { color: var(--as-crit); }
+.anystatus .as-name[data-level="unknown"] { color: var(--as-unknown); }
+.anystatus .as-name[data-level="warn"] { color: var(--as-warn); }
+.anystatus .as-more { color: var(--color-text-dimmed, #666); white-space: nowrap; }
 .anystatus .as-meta {
 	grid-column: 2;
 	grid-row: 1;

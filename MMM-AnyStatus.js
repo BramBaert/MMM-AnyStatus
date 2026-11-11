@@ -96,8 +96,18 @@ Module.register("MMM-AnyStatus", {
 		}));
 		const names = { crit: "red", unknown: "grey", warn: "amber" };
 		for (const group of view.groups) {
+			// The names, each in its level's colour, replace the "2 red, 1 grey" counts; the counts stay as a tooltip.
 			const parts = ["crit", "unknown", "warn"].filter((l) => group.counts[l]).map((l) => `${group.counts[l]} ${names[l]}`);
-			wanted.push({ key: `group:${group.group}`, level: group.level, label: group.group, summary: parts.join(", "), meta: String(group.count) });
+			wanted.push({
+				key: `group:${group.group}`,
+				level: group.level,
+				label: group.group,
+				summary: group.members.map((m) => m.label).join(", ") + (group.more ? ` +${group.more} more` : ""),
+				names: group.members,
+				more: group.more,
+				title: parts.join(", "),
+				meta: String(group.count),
+			});
 		}
 		this.reconcile(wanted);
 
@@ -121,7 +131,21 @@ Module.register("MMM-AnyStatus", {
 			}
 			el.dataset.level = want.level;
 			el.children[0].textContent = want.label;
-			el.children[1].textContent = want.summary;
+			if (want.names) {
+				const summary = el.children[1];
+				summary.textContent = "";
+				want.names.forEach((m, i) => {
+					if (i > 0) summary.append(", ");
+					const span = this.element("span", "as-name", m.label);
+					span.dataset.level = m.level;
+					summary.append(span);
+				});
+				if (want.more) summary.append(this.element("span", "as-more", ` +${want.more} more`));
+				el.title = want.title;
+			} else {
+				el.children[1].textContent = want.summary;
+				el.removeAttribute("title");
+			}
 			el.children[2].textContent = want.meta;
 		}
 		for (const [key, el] of this.cards) {
