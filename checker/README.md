@@ -30,7 +30,7 @@ example config has four checks:
 Point the MagicMirror module at it: `checkerUrl: "http://127.0.0.1:8099"`.
 
 To use it in your own project: `uv add mmm-anystatus-checker` (not on PyPI yet: `uv add ./checker` from a checkout),
-with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases.
+with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases, `[mqtt]` for MQTT.
 
 ## Commands
 
@@ -50,6 +50,42 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
 - **`python`**: `function = "module:function"`, optional `path`; the function gets the other keys as a dict and returns
   a number or `anystatus.Observation(level=..., summary=..., value=..., unit=...)`. May be `async`.
 
+- **`mqtt`**: a device that publishes a heartbeat or a state. Needs the `mqtt` extra
+  (`uv add "mmm-anystatus-checker[mqtt]"`, or `uv sync --extra mqtt` in a checkout). Brokers are a table, shared by
+  the checks that name them (one connection per broker, automatic reconnect):
+
+  ```toml
+  [mqtt.home]
+  host = "broker.example"
+  port = 8883            # default 1883, or 8883 with tls = true
+  tls = true             # optional ca_file = "ca.pem" (relative to this file) for a private CA
+  username = "anystatus"
+  password_env = "MQTT_PASSWORD"
+  # client_id = "..."    # optional
+
+  [[check]]
+  id = "boiler.heartbeat"
+  type = "mqtt"
+  broker = "home"
+  topic = "boiler/heartbeat"     # one exact topic: wildcards (+, #) are not supported yet
+  warn = "3m"
+  crit = "10m"
+  ```
+
+  Three ways to read a topic. **Heartbeat** (no `json`, no `levels`): the value is the age of the last message, the
+  limits are durations. **Value** (`json = "a.b.0.c"`, or a plain numeric payload together with `max_age`): the
+  value comes from the last message, with the usual limits; `max_age` makes a topic that has been silent that long
+  `crit`. **Levels** (`levels = { Online = "ok", Offline = "crit" }`): the payload names the level; any other
+  payload is `unknown`. `json` and `levels` cannot be combined.
+
+  **Retained messages never count as a heartbeat** (a restart would make a dead device look alive): their payload
+  is used, their time only if the payload carries one (`time_json = "ts"`, RFC 3339 or Unix seconds). The last
+  message's time and payload are kept in the memory file, so a restart does not reset the age. A broker that
+  cannot be reached makes its checks `unknown` ("broker home unreachable"). If no message was ever seen, the age is
+  at least the time since the checker subscribed: it turns `warn` or `crit` once that reaches a limit, and is
+  `unknown` ("no message yet") before. `once` exits right after starting, so it reports the broker as unreachable
+  for `mqtt` checks: use `run`.
+
 Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `confirm`, `warn`, `crit`, `worse` and `summary`
 (a template: `"last backup {age} ago"`), as described in docs/checker.md.
 
@@ -66,7 +102,8 @@ uv run --python 3.11 pytest        # the oldest supported Python
 ```
 
 The real-database tests (MariaDB, PostgreSQL) are skipped: they need a server and the extras
-(`uv sync --extra mysql --extra postgres`).
+(`uv sync --extra mysql --extra postgres`). The mqtt test against a real broker is skipped unless
+`ANYSTATUS_TEST_MQTT=host:port` names one (`docker run --rm -p 1883:1883 -v ${PWD}/tests/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro eclipse-mosquitto:2.0.22`).
 
 A new check type is one file in `src/anystatus/checks/` (subclass `Check`, decorate with `@register`, import it in
 `checks/__init__.py`). A type can also listen all the time (`start`/`stop`), keep its own data in the memory file

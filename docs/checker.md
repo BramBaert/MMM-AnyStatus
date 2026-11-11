@@ -186,7 +186,7 @@ the container itself.
 | `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
 | `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
 | `result_file` *(proposed)* | as the file says | | | | 4 |
-| `mqtt` *(proposed)* | age of the last message, a value from it, or a level it names | above | none | `mqtt` extra, a broker | 4 |
+| `mqtt` | age of the last message, a value from it, or a level it names | above | none | `mqtt` extra, a broker | 4 |
 | `system` *(proposed)* | temperature, load, memory used | above | none | Linux | 4 |
 | `systemd` *(proposed)* | | | | systemd on the host | later |
 | `dns` *(proposed)* | lookup time, ms | above | none; no answer is `crit` | | later |
@@ -503,7 +503,7 @@ Resolves a name and optionally compares the answer (`expect = ["192.0.2.10"]`); 
 standard library can only ask the system's resolver, so asking a *specific* server (is the Pi-hole answering?) needs
 an extra (`dnspython`).
 
-### `mqtt` (proposed, step 4)
+### `mqtt` (step 4)
 
 MQTT as a **source**: a device or service that publishes a heartbeat or a state. (design.md keeps MQTT out as the
 *transport* to the display; that is a different question.)
@@ -562,6 +562,9 @@ Rules:
   only if the payload carries one (`time_json = "ts"`).
 - **The last message's time and payload are kept in the SQLite memory.** A restart then doesn't reset a heartbeat's
   age to zero or forget a state. They are kept only within the [continuity rule](#memory-the-sqlite-file).
+- **No message ever seen** (none since the checker started, none restored from the memory): the age is at least the
+  time since the subscription started. If that lower bound already reaches `crit`, the result is `crit` ("no
+  message for over 10 min"); if it reaches `warn`, `warn`; otherwise `unknown` ("no message yet").
 - **A broker the checker can't reach** makes its checks `unknown` ("broker home unreachable"), debounced by `confirm`
   like any failure. Reconnecting is automatic, with backoff.
 - `ts` is when the check was evaluated, as for every check. The message time feeds the value, never `ts`.
