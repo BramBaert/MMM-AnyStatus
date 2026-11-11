@@ -1,0 +1,66 @@
+# A config that runs without any setup. From the checker/ folder:
+#
+#   uv run examples/update_demo_db.py            # once: creates examples/demo.sqlite (see the README)
+#   uv run anystatus-checker run examples/config.toml
+#   curl http://127.0.0.1:8099/results
+#
+# Or without waiting for intervals:  uv run anystatus-checker once examples/config.toml
+
+[checker]
+name = "example-checker"
+listen = "127.0.0.1:8099"   # localhost only; results can reveal internal names
+state = "example-state.sqlite"   # relative to this file
+
+[defaults]
+interval = "30s"
+confirm = 2                 # a change of level must be seen twice in a row before it is shown
+
+# 1. ping: runs the system `ping`. Value: the average round trip in ms.
+[[check]]
+id = "ping.localhost"
+type = "ping"
+label = "This machine"
+group = "network"
+host = "localhost"
+count = 2
+warn = 50                   # ms
+crit = 200
+
+# 2. sql_age: how old is the newest timestamp in a table? The script update_demo_db.py keeps this one fresh.
+[[check]]
+id = "demo.heartbeat"
+type = "sql_age"
+label = "Demo heartbeat"
+group = "demo"
+database = "sqlite:demo.sqlite"          # relative to this file; sqlite:///abs/path.db is absolute
+query = "SELECT max(written_at) FROM heartbeat"
+warn = "1m"                 # durations: "30s", "5m", "2h", "1d", "1h30m"
+crit = "5m"
+summary = "last heartbeat {age} ago"
+
+# 3. sql_age on purpose-stale data: the nightly job "last ran" 3 days ago, so this one is red.
+#    The time in the table has no offset ("2026-11-08 02:15:00"): `timezone` says which clock wrote it.
+[[check]]
+id = "demo.nightly"
+type = "sql_age"
+label = "Nightly job (stale on purpose)"
+group = "demo"
+confirm = 1                 # a daily check: show a problem at once
+interval = "5m"
+database = "sqlite:demo.sqlite"
+query = "SELECT max(finished_at) FROM nightly_runs WHERE ok = 1"
+timezone = "UTC"
+warn = "26h"                # one missed nightly run is amber...
+crit = "50h"                # ...two is red
+
+# 4. python: your own function. Any other key (here `path`) is passed to it.
+[[check]]
+id = "custom.disk"
+type = "python"
+label = "Disk used"
+group = "demo"
+function = "my_checks:disk_used_percent"
+path = "."                  # the folder this config lives in: where the function is imported from, too
+warn = 85
+crit = 95
+summary = "{value} % used"

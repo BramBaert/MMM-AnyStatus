@@ -228,3 +228,6 @@ npm-debug.log*
 !/lib/
 # Written by MagicMirror into the mounted dev config folder (dev/custom.css is ours: the dev page's layout)
 dev/basepath.js
+
+# The checker's example data and memory files (made by checker/examples)
+checker/examples/*.sqlite*
