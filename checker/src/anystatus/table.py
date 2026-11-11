@@ -92,6 +92,23 @@ class Table:
             return default
         return value
 
+    def int_list(self, key: str, minimum: int, maximum: int) -> list[int] | None:
+        """A whole number or a non-empty list of them, each between `minimum` and `maximum`. None when not given."""
+        value = self._take(key)
+        if value is _MISSING:
+            return None
+        items = value if isinstance(value, list) else [value]
+        if (
+            not items
+            or not all(isinstance(i, int) and not isinstance(i, bool) for i in items)
+            or any(not minimum <= i <= maximum for i in items)
+        ):
+            self.error(
+                f"'{key}' must be a number or a list of numbers between {minimum} and {maximum}, such as [200]"
+            )
+            return None
+        return list(items)
+
     def boolean(self, key: str, default: bool) -> bool:
         value = self._take(key)
         if value is _MISSING:
@@ -172,6 +189,11 @@ class Table:
         name = self.opt_str(f"{key}_env")
         if name is None:
             return None
+        return self.env_value(name)
+
+    def env_value(self, name: str) -> str | None:
+        """The value of the environment variable `name`, remembered as a secret (masked in logs); None, and noted as
+        missing, when it isn't set."""
         value = self.ctx.env.get(name)
         if value is None:
             self.missing_env.append(name)

@@ -64,3 +64,17 @@ path = "."                  # the folder this config lives in: where the functio
 warn = 85
 crit = 95
 summary = "{value} % used"
+
+# 5. http: one GET. Here it asks this checker's own /results and reads a time out of the answer, so it needs no
+#    outside server. Under `run` it is green; `once` serves nothing, so there it reports "connection refused".
+[[check]]
+id = "http.self"
+type = "http"
+label = "This checker's /results"
+group = "demo"
+url = "http://127.0.0.1:8099/results"
+json = "results.0.ts"       # a dotted path into the JSON answer; list items by number
+value_is = "time"           # the value is a timestamp: its age is compared with the limits
+warn = "2m"
+crit = "5m"
+summary = "first result written {age} ago"
