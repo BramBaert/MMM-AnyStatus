@@ -18,7 +18,7 @@ uv run anystatus-checker run examples/config.toml     # the service; stop with C
 ```
 
 Then open <http://127.0.0.1:8099/> (a readable overview) or fetch <http://127.0.0.1:8099/results> (the JSON). The
-example config has four checks:
+example config has five checks:
 
 | Check | What it shows |
 |---|---|
