@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node (the MagicMirror module's side)
+node_modules/
+npm-debug.log*
+.npm/
