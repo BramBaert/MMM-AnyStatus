@@ -1,0 +1,80 @@
+{
+  "spec": "1.0",
+  "source": "demo-checker",
+  "results": [
+    {
+      "id": "ping.router",
+      "label": "Router",
+      "group": "network",
+      "level": "ok",
+      "value": 1.8,
+      "unit": "ms",
+      "since": "2026-11-02T08:00:12Z",
+      "ts": "2026-11-11T14:03:00Z",
+      "ttl": 180
+    },
+    {
+      "id": "ping.printer",
+      "label": "Printer",
+      "group": "network",
+      "level": "ok",
+      "since": "2026-11-05T19:30:00Z",
+      "ts": "2026-11-11T14:02:30Z",
+      "ttl": 180
+    },
+    {
+      "id": "tls.example",
+      "label": "Certificate example.test",
+      "group": "network",
+      "level": "ok",
+      "value": 61,
+      "unit": "days left",
+      "since": "2026-09-14T00:00:00Z",
+      "ts": "2026-11-11T14:00:00Z",
+      "ttl": 86400
+    },
+    {
+      "id": "docker.updates",
+      "label": "Image updates",
+      "group": "docker",
+      "level": "warn",
+      "summary": "3 images have a newer version",
+      "value": 3,
+      "since": "2026-11-10T06:00:00Z",
+      "ts": "2026-11-11T14:00:00Z",
+      "ttl": 259200
+    },
+    {
+      "id": "backup.nas",
+      "label": "NAS backup",
+      "group": "backups",
+      "level": "crit",
+      "summary": "last backup 3 days ago",
+      "value": 3.1,
+      "unit": "days",
+      "since": "2026-11-08T14:00:00Z",
+      "ts": "2026-11-11T14:00:00Z",
+      "ttl": 900
+    },
+    {
+      "id": "db.orders",
+      "label": "Orders database",
+      "group": "database",
+      "level": "unknown",
+      "summary": "query timed out after 10 s",
+      "since": "2026-11-11T13:40:00Z",
+      "ts": "2026-11-11T14:02:00Z",
+      "ttl": 600
+    },
+    {
+      "id": "sensor.garage",
+      "label": "Garage sensor",
+      "group": "home",
+      "level": "ok",
+      "summary": "21.4 C",
+      "since": "2026-10-01T00:00:00Z",
+      "ts": "2026-11-11T10:00:00Z",
+      "ttl": 900
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+.anystatus {
+	--as-ok: #4caf7a;
+	--as-warn: #e0a030;
+	--as-crit: #e0524a;
+	--as-unknown: #8a8f98;
+	width: 22em;
+	max-width: 100%;
+	text-align: left;
+}
+
+/* The big calm state, shown only when everything is green. */
+.anystatus .as-ok {
+	text-align: center;
+	color: var(--as-ok);
+	overflow: hidden;
+	max-height: 0;
+	opacity: 0;
+	transition: max-height 0.8s ease, opacity 0.8s ease;
+}
+.anystatus.as-is-ok .as-ok {
+	max-height: 8em;
+	opacity: 1;
+}
+.anystatus .as-ok-title {
+	font-size: 2.6em;
+	font-weight: 300;
+	line-height: 1.2;
+}
+.anystatus .as-ok-sub {
+	font-size: 0.8em;
+	color: var(--color-text-dimmed, #666);
+}
+
+/* A card: level colour on the left edge, label and reason, and how long it has been so. */
+.anystatus .as-card {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	column-gap: 1em;
+	margin-bottom: 0.4em;
+	padding: 0.35em 0.7em;
+	border-left: 0.3em solid var(--as-unknown);
+	background: rgba(255, 255, 255, 0.06);
+	max-height: 6em;
+	overflow: hidden;
+	opacity: 1;
+	transition: max-height 0.7s ease, opacity 0.7s ease, margin 0.7s ease, padding 0.7s ease, border-color 0.7s ease;
+}
+.anystatus .as-card[data-level="crit"] { border-left-color: var(--as-crit); }
+.anystatus .as-card[data-level="warn"] { border-left-color: var(--as-warn); }
+.anystatus .as-card[data-level="unknown"] { border-left-color: var(--as-unknown); }
+
+.anystatus .as-card.as-enter,
+.anystatus .as-card.as-leave {
+	max-height: 0;
+	opacity: 0;
+	margin-bottom: 0;
+	padding-top: 0;
+	padding-bottom: 0;
+}
+
+.anystatus .as-label {
+	font-size: 1.1em;
+	color: var(--color-text-bright, #fff);
+}
+.anystatus .as-card[data-level="crit"] .as-label { color: var(--as-crit); }
+.anystatus .as-card[data-level="unknown"] .as-label { color: var(--as-unknown); }
+.anystatus .as-summary {
+	grid-column: 1;
+	font-size: 0.8em;
+	color: var(--color-text, #999);
+}
+.anystatus .as-meta {
+	grid-column: 2;
+	grid-row: 1;
+	font-size: 0.8em;
+	color: var(--color-text-dimmed, #666);
+	white-space: nowrap;
+	align-self: center;
+}
+
+.anystatus .as-foot {
+	font-size: 0.75em;
+	color: var(--color-text-dimmed, #666);
+	text-align: right;
+}
