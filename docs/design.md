@@ -95,6 +95,8 @@ stuck check can never hide behind a last "OK".
   heartbeat), so the module's age rule works.
 - **Docker access:** the Docker socket is root on its host. The checker should need **read-only** access only.
   How (a read-only socket proxy, or a documented `GET`-only setup): **open**.
+- **Python 3.11 or newer** (decided 2026-11-11): 3.11 brings `tomllib` and is what Debian 12 / Raspberry Pi OS
+  ship. Developed on 3.14; CI tests both ends.
 - **Installable with uv or pip**; PyPI later. A container image for those who run everything in Docker.
 
 ## The module
