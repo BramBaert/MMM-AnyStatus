@@ -226,5 +226,5 @@ npm-debug.log*
 
 # The module's own lib/ (the Python rule above would hide it)
 !/lib/
-dev/custom.css
+# Written by MagicMirror into the mounted dev config folder (dev/custom.css is ours: the dev page's layout)
 dev/basepath.js

@@ -1,0 +1,7 @@
+/*
+ * Dev page only (MagicMirror loads config/custom.css): three module instances side by side must fit a short,
+ * narrow screen (1280x720) too. Users size the module in their own custom.css the same way.
+ */
+.anystatus {
+	max-width: 29vw;
+}

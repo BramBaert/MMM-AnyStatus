@@ -4,8 +4,7 @@
 	--as-crit: #e0524a;
 	--as-unknown: #8a8f98;
 	width: 22em;
-	/* On a narrow screen three columns of 22em would overlap: shrink to a third of the screen at most. */
-	max-width: min(100%, 29vw);
+	max-width: 100%;
 	text-align: left;
 }
 

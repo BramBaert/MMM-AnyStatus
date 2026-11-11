@@ -114,7 +114,8 @@ the state on its first fetch, and no broker or extra module is needed. The check
 
 **UI (first draft):**
 - "All OK" when everything is green; otherwise only the non-green cards, red above amber, each with "since …".
-- Collapse to a count per group when there are more than N items.
+- Collapse to one row per group when there are more than N items: the group's count and the names of its checks,
+  each in its level's colour, worst first, at most ~4 names then "+N more".
 - Debounce, so a check that flips back and forth doesn't flicker.
 - Smooth transitions.
 

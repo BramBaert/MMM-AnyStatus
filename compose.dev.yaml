@@ -29,7 +29,7 @@ services:
     environment:
       TZ: UTC
     volumes:
-      - ./dev:/opt/magic_mirror/config # MagicMirror writes custom.css and basepath.js here (git-ignored)
+      - ./dev:/opt/magic_mirror/config # config.js and custom.css (the dev page's layout); MagicMirror writes basepath.js here (git-ignored)
       - .:/opt/magic_mirror/modules/MMM-AnyStatus:ro
 
 volumes:
