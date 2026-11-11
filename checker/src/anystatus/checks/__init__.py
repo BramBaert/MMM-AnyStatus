@@ -1,6 +1,9 @@
 """Check types. Importing this package registers them all."""
 
 from anystatus.checks import (  # noqa: F401  (registration)
+    disk,
+    exec_cmd,
+    file_age,
     http,
     mqtt,
     ping,
@@ -8,6 +11,7 @@ from anystatus.checks import (  # noqa: F401  (registration)
     result_file,
     sql_age,
     sql_value,
+    system,
     tcp,
     tls_expiry,
 )
