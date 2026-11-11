@@ -94,7 +94,8 @@ stuck check can never hide behind a last "OK".
 - **It serves its current results over HTTP**, on a port from its config. Each result again every round (a
   heartbeat), so the module's age rule works.
 - **Docker access:** the Docker socket is root on its host. The checker should need **read-only** access only.
-  How (a read-only socket proxy, or a documented `GET`-only setup): **open**.
+  How: **decided: docker-socket-proxy, see [checker.md](checker.md)** (`CONTAINERS=1`, `IMAGES=1`; mounting the socket
+  `:ro` is not read-only).
 - **Python 3.11 or newer** (decided 2026-11-11): 3.11 brings `tomllib` and is what Debian 12 / Raspberry Pi OS
   ship. Developed on 3.14; CI tests both ends.
 - **Installable with uv or pip**; PyPI later. A container image for those who run everything in Docker.
@@ -147,7 +148,7 @@ It has to be easy for other people:
 - **MQTT as the transport in v1?** Proposal: no. A job that has to report itself (push) sends an HTTP POST to the
   checker's port, in the same format as a result. **MQTT as a source** is a different matter: a device's heartbeat
   or state on a topic is a status where it lives, so it gets a check type (`mqtt` in [checker.md](checker.md)).
-- **Read-only Docker access** (above).
+- **Read-only Docker access:** decided (above).
 - **Limits in `config.js`** instead of the checker, for users who only want MMM-MysqlQuery-style checks? Not in v1.
 - **Touch screens:** tap to expand a card? Not in v1.
 - **The name:** free on 2026-11-11 (not in the module list on MagicMirror's wiki, no GitHub repository, not on npm);

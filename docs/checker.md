@@ -182,7 +182,7 @@ the container itself.
 | `file_age` | age of the newest matching file | above | none; no file is `crit` | | 4 |
 | `disk` | used % | above | warn 85, crit 95 | | 4 |
 | `exec` | from the plugin's output | | none; the exit code is the level | the command | 4 |
-| `docker_status` | containers not fine | above | crit 1 | Docker API access | 4 |
+| `docker_status` | containers not fine | above | none; it decides its own level | Docker API access | 4 |
 | `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
 | `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
 | `result_file` | as the file says | | | | 4 |
@@ -394,9 +394,11 @@ The value is the number of containers that aren't fine. The summary names them (
 in 1 h"), and the level is the worst of them. One check covers a set of containers, so ten containers don't make
 ten cards. Make separate checks if they should.
 
-**Read-only access** (the open question in design.md): the proposal is to document [docker-socket-proxy] with only
-`CONTAINERS=1` and `IMAGES=1`, which refuses every `POST`, and to recommend it over mounting the socket. Mounting
-`/var/run/docker.sock:ro` does *not* make the API read-only; the docs must say so plainly.
+**Read-only access** (decided, see design.md): use [docker-socket-proxy] with only `CONTAINERS=1` and `IMAGES=1`, which
+refuses every `POST`, rather than mounting the socket. Mounting `/var/run/docker.sock:ro` does *not* make the API
+read-only, and the checker README says so plainly. The checks only ever send `GET`, without an API version in the
+path (the engine answers in its own current one). On Windows there are no unix sockets to reach: `docker` must be a
+`tcp://` address (the proxy).
 
 [docker-socket-proxy]: https://github.com/Tecnativa/docker-socket-proxy
 
@@ -441,7 +443,7 @@ confirm = 1
 trivy = "trivy"             # the command, or a path
 ```
 
-Runs `trivy image --format json --ignore-unfixed` for each running container's image and counts **only CVEs that
+Runs `trivy image --format json --ignore-unfixed --quiet --scanners vuln` for each running container's image and counts **only CVEs that
 have a fix**. A base image always carries "will not fix" CVEs, so counting those would make the check amber forever.
 
 - A fixable `CRITICAL` CVE makes it `crit`, a fixable `HIGH` one `warn` (`severities` changes which count).

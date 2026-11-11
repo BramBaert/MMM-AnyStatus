@@ -249,6 +249,115 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   `unknown` ("no message yet") before. `once` exits right after starting, so it reports the broker as unreachable
   for `mqtt` checks: use `run`.
 
+- **`docker_status`**, **`docker_updates`**, **`image_vulns`**: the Docker checks. They talk to the Docker API with
+  `GET` requests only (standard library, no Docker SDK), at `docker = "unix:///var/run/docker.sock"` (the default) or
+  `docker = "tcp://host:2375"`. Paths carry no API version: the engine answers in its own current one. **On Windows
+  only `tcp://` works** (a `unix://` address is a config error): reach Docker through a socket proxy. See
+  [Read-only access to Docker](#read-only-access-to-docker) first.
+
+  **`docker_status`**: are the containers running, healthy and not restarting in a loop? `containers = ["db",
+  "web"]` (by name), or `labels = ["status.watch=true"]` (all of them must match), or neither: every running
+  container. Not both. A *listed* container that is missing or not running is `crit` ("backup: missing", "db: not
+  running (exited)"; with `labels` or the default only running containers are looked at). `unhealthy` is `crit`,
+  `starting` is fine. More than `restarts` (default 3) restarts within `restart_window` (default `"1h"`) is `warn`
+  ("web: 5 restarts in 1 h"): the growth of Docker's `RestartCount`, kept in the memory file so the window survives a
+  checker restart (within the `ttl`). The first sighting of a container never counts as growth. The value is the number of
+  containers that are not fine, the level the worst. The check decides its own level: `warn`, `crit` and `worse` are
+  a config error. Docker unreachable (or a proxy that refuses the path) is `unknown`.
+
+  **`docker_updates`**: does an image of a running container have an update in its registry? *Rebuilt*: the digest
+  the registry gives for the tag (one `HEAD` on the manifest, which Docker Hub doesn't count as a pull) is none of
+  the local image's `RepoDigests` (multi-arch images: the index digest on both sides). *Newer version*: a higher tag
+  with the same shape (`1.27.3-alpine` → `1.27.4-alpine`; not `1.27.4`, not `1.27.4-perl`): `versions = "minor"`
+  (default) allows the same major, `"major"` any, `"none"` only the digest. `latest` and other tags that aren't
+  versions are checked by digest only. An image started by digest (`image@sha256:...`) is skipped on purpose (the
+  summary says "1 pinned by digest, skipped"), as is one built locally (no digest to compare). The value is the number
+  of images with an update, **`warn` at most** (`crit` is a config error; `warn = 2` makes it amber from two images);
+  the summary names them: "3 images: nginx (rebuilt), grafana 11.2 → 11.3, …". `ignore = ["postgres",
+  "ghcr.io/org/app:1"]` skips images (by name, repository, or name:tag). A registry that doesn't answer makes
+  *that image* unknown (named in the summary); the check is `unknown` only if no registry answered. Tag lists are read
+  in pages (at most 10 of up to 1000 tags, then the summary says "tag list cut after 10 pages"). Registries are asked
+  over https; `localhost` and `127.x` over http (as Docker does). Private registries:
+  `registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }` maps a registry host to an environment variable that holds
+  **`user:password`** (for ghcr.io a personal access token as the password). It is sent only to that registry's own
+  token service (or Docker Hub's), never to another host a registry names. The usual interval is a day
+  (`confirm = 1`).
+
+  **`image_vulns`**: runs [Trivy](https://trivy.dev) (`trivy image --format json --ignore-unfixed --quiet --scanners
+  vuln <image>`, a list, no shell) for each distinct image and counts **only vulnerabilities that have a fix**. A
+  fixable `CRITICAL` is `crit`, any other counted severity (`HIGH` by default) is `warn`; `severities = ["CRITICAL",
+  "HIGH", "MEDIUM"]` changes which severities count at all. The value is the number of fixable CVEs, the summary
+  names the worst image ("grafana: 2 critical, 1 high, fixed in 11.3.1"; "fixed in" appears when one version fixes
+  the worst ones). `trivy = "trivy"` is the command, a path, or a list such as `["docker", "run", "--rm", ...]`; **if it
+  can't be found the config is invalid** (and a Trivy that vanishes later makes the check `unknown`). `cache_dir`
+  is Trivy's `--cache-dir`: keep it on a volume so the database isn't downloaded every day. **`timeout = "15m"`**
+  (the first run downloads the database; the default 10 s is too short, and the config warns about that): each
+  image's scan gets the time that is left of the run, and a timeout kills Trivy. An image that couldn't be scanned
+  is counted in the summary ("1 not scanned"); no image scanned at all is `unknown`. As for `exec`, only the
+  environment variables listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME",
+  "DOCKER_HOST"]` (it reads local images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375`
+  with `IMAGES=1` on the proxy; otherwise it pulls from the registry). The checker image doesn't contain Trivy.
+  `warn`, `crit` and `worse` are a config error.
+
+  ```toml
+  [[check]]
+  id = "docker.containers"
+  type = "docker_status"
+  label = "Containers"
+  docker = "tcp://docker-socket-proxy:2375"
+  containers = ["db", "web", "backup"]
+  restarts = 3
+
+  [[check]]
+  id = "docker.updates"
+  type = "docker_updates"
+  label = "Image updates"
+  docker = "tcp://docker-socket-proxy:2375"
+  interval = "1d"
+  confirm = 1
+  ignore = ["postgres"]
+  registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }   # GHCR_AUTH=user:token
+
+  [[check]]
+  id = "docker.vulns"
+  type = "image_vulns"
+  label = "Vulnerabilities"
+  docker = "tcp://docker-socket-proxy:2375"
+  interval = "1d"
+  timeout = "15m"
+  confirm = 1
+  trivy = "/usr/local/bin/trivy"
+  cache_dir = "/var/cache/trivy"
+  env = ["HOME", "DOCKER_HOST"]
+  ```
+
+### Read-only access to Docker
+
+The Docker socket is root on its host: anything that can `POST` to it can start a privileged container. The checks
+only ever `GET`, but **mounting `/var/run/docker.sock:ro` does not make the API read-only**: `:ro` protects the
+socket *file* from being replaced, while every request through it still works. Put a
+[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in between, which refuses every `POST` and every
+section you don't switch on, and point the checks at it. The checker then needs no access to the socket at all:
+
+```yaml
+services:
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    environment:
+      CONTAINERS: 1      # GET /containers/...: docker_status, docker_updates, image_vulns
+      IMAGES: 1          # GET /images/...: docker_updates (and Trivy reading local images)
+      POST: 0            # the default: no change is possible
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # no ports: only the checker's network can reach it
+  checker:
+    # ...
+    depends_on: [docker-socket-proxy]
+```
+
+and `docker = "tcp://docker-socket-proxy:2375"` in the checks. `compose.dev.yaml` in this repository runs exactly
+this for the dev stack; a `POST /containers/create` through it answers `403 Forbidden`.
+
 Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `confirm`, `warn`, `crit`, `worse` and `summary`
 (a template: `"last backup {age} ago"`), as described in docs/checker.md.
 
