@@ -80,6 +80,8 @@ class Broker:
         self._checks: list[MqttCheck] = []
         self._client: Any = None
         self._connected = False
+        self._connected_at: datetime | None = None
+        self.now: Callable[[], datetime] = _now
 
     # state
 
@@ -87,6 +89,12 @@ class Broker:
     def connected(self) -> bool:
         with self._lock:
             return self._connected
+
+    @property
+    def connected_at(self) -> datetime | None:
+        """When the latest (re)connect happened. Messages sent before it may have been missed."""
+        with self._lock:
+            return self._connected_at
 
     def topics(self) -> list[str]:
         with self._lock:
@@ -151,6 +159,7 @@ class Broker:
             return
         with self._lock:
             self._connected = True
+            self._connected_at = self.now()
         log.info("broker %s: connected", self.name)
         for topic in self.topics():  # resubscribe on every (re)connect: a clean session forgets them
             client.subscribe(topic, 0)
@@ -381,7 +390,13 @@ class MqttCheck(Check):
             self._started = now
         with self._lock:
             payload, moment = self._payload, self._time
-        waited = max(0.0, age_seconds(self._started, now))  # a lower bound of the age when nothing was seen
+        # A lower bound of the age when nothing was seen: only the time we have been listening since the latest
+        # (re)connect counts, since a message sent while the broker was out of reach may have been missed.
+        listening = self._started
+        connected_at = self.broker.connected_at
+        if connected_at is not None and connected_at > listening:
+            listening = connected_at
+        waited = max(0.0, age_seconds(listening, now))
         mode = self.mode
 
         if mode == "heartbeat":

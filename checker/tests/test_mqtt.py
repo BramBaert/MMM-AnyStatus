@@ -72,6 +72,7 @@ class Rig:
         self.config = parse(BROKER + text, tmp_path)
         self.check: MqttCheck = self.config.checks[0].check  # type: ignore[assignment]
         self.check.now = self.clock.now
+        self.check.broker.now = self.clock.now
         self.memory = StoreMemory(self.config.checks[0].id, store, self.clock, None)
 
     def start(self, data: dict[str, Any] | None = None) -> Rig:
@@ -135,6 +136,19 @@ def test_no_message_ever_is_unknown_until_a_limit_is_reached(tmp_path: Path) -> 
     rig.clock.advance(420)
     out = rig.run()
     assert isinstance(out, Observation) and (out.level, out.summary) == ("crit", "no message for over 10 min")
+
+
+def test_no_message_counts_only_from_the_latest_connect(tmp_path: Path) -> None:
+    """A broker that comes up late (or reconnects) restarts the lower bound: messages sent while it was out of
+    reach may have been missed, so they are no proof of silence."""
+    rig = Rig(HEARTBEAT, tmp_path).start()
+    rig.clock.advance(3600)  # an hour of listening without a message...
+    connect(rig.check)  # ...then the connection drops and comes back
+    with pytest.raises(CheckFailure, match="no message yet"):
+        rig.run()
+    rig.clock.advance(180)
+    out = rig.run()
+    assert isinstance(out, Observation) and out.level == "warn"
 
 
 def test_no_message_without_limits_stays_unknown(tmp_path: Path) -> None:

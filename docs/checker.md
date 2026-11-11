@@ -563,7 +563,8 @@ Rules:
 - **The last message's time and payload are kept in the SQLite memory.** A restart then doesn't reset a heartbeat's
   age to zero or forget a state. They are kept only within the [continuity rule](#memory-the-sqlite-file).
 - **No message ever seen** (none since the checker started, none restored from the memory): the age is at least the
-  time since the subscription started. If that lower bound already reaches `crit`, the result is `crit` ("no
+  time since the latest (re)connect to the broker. Earlier time doesn't count: a message sent while the broker was
+  out of reach may have been missed. If that lower bound already reaches `crit`, the result is `crit` ("no
   message for over 10 min"); if it reaches `warn`, `warn`; otherwise `unknown` ("no message yet").
 - **A broker the checker can't reach** makes its checks `unknown` ("broker home unreachable"), debounced by `confirm`
   like any failure. Reconnecting is automatic, with backoff.
