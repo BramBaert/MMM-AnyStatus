@@ -80,8 +80,15 @@ Module.register("MMM-AnyStatus", {
 		const now = Date.now();
 		const view = AnyStatus.arrange(this.items(now), this.config.maxItems);
 
+		// Card keys must be unique: an id used more than once (SPEC: every one shows) gets "#2", "#3"...
+		const seenIds = new Map();
+		const keyFor = (id) => {
+			const n = (seenIds.get(id) || 0) + 1;
+			seenIds.set(id, n);
+			return n === 1 ? id : `${id}#${n}`;
+		};
 		const wanted = view.cards.map((item) => ({
-			key: item.id,
+			key: keyFor(item.id),
 			level: item.level,
 			label: item.label,
 			summary: item.summary,
