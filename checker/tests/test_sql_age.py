@@ -153,7 +153,8 @@ def test_password_in_the_url_is_a_config_error(tmp_path: Path) -> None:
 def test_sqlite_paths(tmp_path: Path) -> None:
     assert parse_database_url("sqlite:///var/lib/x.db", None, tmp_path).path == Path("/var/lib/x.db")
     assert parse_database_url("sqlite:rel/x.db", None, tmp_path).path == tmp_path / "rel/x.db"
-    assert parse_database_url("sqlite:///C:/data/x.db", None, tmp_path).path == Path("C:/data/x.db")
+    if sys.platform == "win32":  # a drive letter only means something on Windows
+        assert parse_database_url("sqlite:///C:/data/x.db", None, tmp_path).path == Path("C:/data/x.db")
     with pytest.raises(ValueError, match="must start with"):
         parse_database_url("oracle://x/y", None, tmp_path)
 
