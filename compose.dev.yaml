@@ -1,0 +1,37 @@
+services:
+  # Node tooling. Node is not needed on the host:
+  #   docker compose -f compose.dev.yaml run --rm node npm install
+  #   docker compose -f compose.dev.yaml run --rm node npm test
+  #   docker compose -f compose.dev.yaml run --rm node npm run lint
+  node:
+    image: node:24-alpine
+    profiles: [tools]
+    working_dir: /app
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules # a named volume: npm install on a Windows bind mount is slow
+    command: npm test
+
+  # The demo results server: times are shifted on every request (--demo) so that the display shows every level.
+  demo:
+    image: python:3.14-alpine
+    command: python /demo/serve.py --demo --host 0.0.0.0 --port 8099
+    volumes:
+      - ./examples/hand-written:/demo:ro
+
+  # Real MagicMirror, server only. Open http://localhost:8080
+  #   docker compose -f compose.dev.yaml up magicmirror
+  magicmirror:
+    image: karsten13/magicmirror:alpine-v2.38.0 # alpine tags run server only
+    depends_on: [demo]
+    ports:
+      - "8080:8080"
+    environment:
+      TZ: UTC
+    volumes:
+      - ./dev:/opt/magic_mirror/config # MagicMirror writes custom.css and basepath.js here (git-ignored)
+      - .:/opt/magic_mirror/modules/MMM-AnyStatus:ro
+
+volumes:
+  node_modules:
+    name: mmm-anystatus-node_modules

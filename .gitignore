@@ -226,3 +226,5 @@ npm-debug.log*
 
 # The module's own lib/ (the Python rule above would hide it)
 !/lib/
+dev/custom.css
+dev/basepath.js

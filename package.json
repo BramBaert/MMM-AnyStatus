@@ -1,0 +1,17 @@
+{
+  "name": "mmm-anystatus",
+  "version": "0.1.0",
+  "description": "A calm status display for MagicMirror: All OK, or only what needs attention.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "ajv": "^8.20.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0"
+  }
+}
