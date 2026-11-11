@@ -61,3 +61,56 @@ test("a timeout is reported as such", async () => {
 	});
 	assert.equal((await fetcher.poll()).error.message, "unreachable: timed out");
 });
+
+const { createPoller, timeoutFor } = require("../lib/fetcher");
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("timeoutFor is capped at the fetch interval and at 10 s", () => {
+	assert.equal(timeoutFor(5000), 5000);
+	assert.equal(timeoutFor(60000), 10000);
+});
+
+test("poller: the next poll starts only after the current one finished (no overlap)", async () => {
+	let running = 0;
+	let maxRunning = 0;
+	let polls = 0;
+	const fetcher = { poll: async () => { polls += 1; running += 1; maxRunning = Math.max(maxRunning, running); await sleep(30); running -= 1; return { doc: {} }; } };
+	const answers = [];
+	const poller = createPoller({ fetcher, intervalMs: 5, onAnswer: (a) => answers.push(a) });
+	poller.start();
+	await sleep(200);
+	poller.stop();
+	assert.equal(maxRunning, 1);
+	assert.ok(polls >= 3, `polls: ${polls}`);
+	assert.equal(answers.length, polls - (running ? 1 : 0));
+});
+
+test("poller: stop ends the loop and drops an in-flight answer", async () => {
+	let polls = 0;
+	const answers = [];
+	const poller = createPoller({ fetcher: { poll: async () => { polls += 1; await sleep(30); return {}; } }, intervalMs: 5, onAnswer: (a) => answers.push(a) });
+	poller.start();
+	await sleep(10);
+	poller.stop();
+	await sleep(120);
+	assert.equal(polls, 1);
+	assert.equal(answers.length, 0);
+});
+
+test("poller: start again (browser reload) runs one loop, not two", async () => {
+	let polls = 0;
+	const fetcher = { poll: async () => { polls += 1; await sleep(20); return {}; } };
+	let answers = 0;
+	const poller = createPoller({ fetcher, intervalMs: 40, onAnswer: () => { answers += 1; } });
+	poller.start();
+	await sleep(5);
+	poller.start(); // restart while the first poll is in flight
+	await sleep(300);
+	poller.stop();
+	const settled = polls;
+	await sleep(100);
+	assert.equal(polls, settled); // nothing keeps running
+	// one loop: about 300 / (20 + 40) polls, plus the dropped one; two loops would roughly double it
+	assert.ok(polls <= 8, `polls: ${polls}`);
+	assert.ok(answers >= 3);
+});

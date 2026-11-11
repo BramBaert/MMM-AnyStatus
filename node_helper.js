@@ -7,15 +7,15 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { createFetcher } = require("./lib/fetcher");
+const { createFetcher, createPoller, timeoutFor } =require("./lib/fetcher");
 
 module.exports = NodeHelper.create({
 	start() {
-		this.instances = new Map(); // identifier -> {timer, fetcher}
+		this.instances = new Map(); // identifier -> poller
 	},
 
 	stop() {
-		for (const instance of this.instances.values()) clearInterval(instance.timer);
+		for (const poller of this.instances.values()) poller.stop();
 		this.instances.clear();
 	},
 
@@ -23,14 +23,15 @@ module.exports = NodeHelper.create({
 		if (notification !== "ANYSTATUS_START") return;
 		const { identifier, checkerUrl, fetchInterval } = payload;
 		const previous = this.instances.get(identifier);
-		if (previous) clearInterval(previous.timer); // the browser reloaded
+		if (previous) previous.stop(); // the browser reloaded: end the old loop, drop its in-flight answer
 
-		const fetcher = createFetcher({ checkerUrl });
-		const run = async () => {
-			const answer = await fetcher.poll();
-			this.sendSocketNotification("ANYSTATUS_RESULTS", Object.assign({ identifier }, answer));
-		};
-		this.instances.set(identifier, { fetcher, timer: setInterval(run, fetchInterval) });
-		run();
+		const fetcher = createFetcher({ checkerUrl, timeoutMs: timeoutFor(fetchInterval) });
+		const poller = createPoller({
+			fetcher,
+			intervalMs: fetchInterval,
+			onAnswer: (answer) => this.sendSocketNotification("ANYSTATUS_RESULTS", Object.assign({ identifier }, answer)),
+		});
+		this.instances.set(identifier, poller);
+		poller.start();
 	},
 });

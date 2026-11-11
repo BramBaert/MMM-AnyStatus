@@ -95,8 +95,9 @@ A consumer MUST compare each result's `ts` with its own clock (`now`) and show t
 - **it is from the future:** `ts > now + ttl`. The producer's clock and the consumer's clock disagree by more
   than the result's own lifetime, so its age can't be judged. The display shows "clock mismatch".
 
-When the age rule applies, the result's own `level` and `summary` are not shown as current. A consumer MAY still
-show them as history ("was: crit, last backup 3 days ago").
+The age rule comes before everything else a result says, an unknown `level` included. When it applies, the
+result's own `level` and `summary` are not shown as current. A consumer MAY still show them as history ("was:
+crit, last backup 3 days ago").
 
 This is what makes a dead producer, a dead network or a stuck check visible: none of them can hide behind a last
 `ok`. It only works if producers keep to the next section.
@@ -136,15 +137,22 @@ A consumer:
 
 - MUST apply [the age rule](#the-age-rule) to every result, every time it redraws, not only when it fetches.
   A display that is never refreshed must still turn grey.
-- MUST show a producer it can't reach, or whose answer isn't a valid document, as one `unknown` item ("home-checker
-  unreachable since 14:03"). It SHOULD keep the last results it had: they turn grey by themselves when their `ttl`
-  runs out.
-- MUST NOT drop a result because it is invalid. If the result has a readable `id`, it shows that id as `unknown`
-  ("invalid result: no ttl"); otherwise one `unknown` item for the document. The same for two results with the same
-  `id`.
-- MUST show a document with a `spec` major version it doesn't support as one `unknown` item ("unsupported spec
-  2.0"). A higher minor version of a supported major version is fine.
+- MUST show a producer it can't reach, whose answer isn't a valid document, or whose document has a `spec` major
+  version it doesn't support, as one `unknown` item ("home-checker unreachable", "unsupported spec 2.0"). In all
+  three cases it SHOULD keep the last valid results it had: they turn grey by themselves when their `ttl` runs out.
+  A higher minor version of a supported major version is fine.
+- MUST NOT drop a result because it is invalid: wrong or missing fields, a time that isn't RFC 3339 with an offset
+  (`since` included), or an `id` used more than once. If the result has a readable `id`, it shows that id as
+  `unknown` ("invalid result: no ttl"); otherwise one `unknown` item for the document. When an `id` is used more
+  than once, every result with that `id` is shown as `unknown`.
+- MUST show a valid document with no results as one `unknown` item ("no checks reported"), not as all fine. A
+  producer that checks nothing is misconfigured.
 - If `since` is later than `ts`, uses `ts`.
+- MUST NOT let the age rule depend on the transport. If the consumer has parts (for MagicMirror: the browser and
+  its `node_helper`), the part that draws applies the age rule and also notices when the part that fetches has gone
+  quiet.
+
+How a consumer words and formats these ("since 14:03" or "since 3 h") is up to it; the texts above are examples.
 
 ## Versioning
 

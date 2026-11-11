@@ -22,15 +22,18 @@ Module.register("MMM-AnyStatus", {
 	},
 
 	start() {
-		this.feed = null; // what the node_helper last reported: {doc, error}
+		this.feed = null; // what the node_helper last reported: {doc, lastValid, error}
+		this.startedAt = Date.now();
+		this.lastFeedAt = null; // when ANYSTATUS_RESULTS last arrived
 		this.cards = new Map(); // key -> element
 		this.wrapper = null;
+		this.fetchInterval = Math.max(5000, Number(this.config.fetchInterval) || this.defaults.fetchInterval);
 
 		if (this.config.checkerUrl) {
 			this.sendSocketNotification("ANYSTATUS_START", {
 				identifier: this.identifier,
 				checkerUrl: this.config.checkerUrl,
-				fetchInterval: Math.max(5000, Number(this.config.fetchInterval) || this.defaults.fetchInterval),
+				fetchInterval: this.fetchInterval,
 			});
 		}
 		setInterval(() => this.render(), this.redrawInterval);
@@ -38,12 +41,9 @@ Module.register("MMM-AnyStatus", {
 
 	socketNotificationReceived(notification, payload) {
 		if (notification !== "ANYSTATUS_RESULTS" || payload.identifier !== this.identifier) return;
-		if (payload.doc !== undefined) {
-			this.feed = { doc: payload.doc, error: null };
-		} else {
-			// Keep the last results: they turn grey by themselves when their ttl runs out.
-			this.feed = { doc: this.feed ? this.feed.doc : null, error: payload.error };
-		}
+		// The last valid results are kept whatever happens: they turn grey by themselves when their ttl runs out.
+		this.lastFeedAt = Date.now();
+		this.feed = AnyStatus.acceptAnswer(this.feed, payload);
 		this.render();
 	},
 
@@ -71,14 +71,14 @@ Module.register("MMM-AnyStatus", {
 		if (!this.config.checkerUrl) {
 			return [{ id: "~config", label: "MMM-AnyStatus", group: null, level: "unknown", summary: "checkerUrl is not configured", since: null, system: true }];
 		}
-		return AnyStatus.buildItems(this.feed, now);
+		return AnyStatus.buildItems(this.feed, now, { lastFeedAt: this.lastFeedAt === null ? this.startedAt : this.lastFeedAt, fetchInterval: this.fetchInterval });
 	},
 
 	// Updates the DOM in place (not through updateDom) so that CSS transitions run.
 	render() {
 		if (!this.wrapper) return;
 		const now = Date.now();
-		const view = AnyStatus.arrange(this.items(now), Number(this.config.maxItems));
+		const view = AnyStatus.arrange(this.items(now), this.config.maxItems);
 
 		const wanted = view.cards.map((item) => ({
 			key: item.id,

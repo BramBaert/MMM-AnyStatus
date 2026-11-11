@@ -69,8 +69,11 @@ You can use the module more than once, each with its own `checkerUrl`.
 - **The age rule**, applied every 15 seconds on the display itself, not only when data arrives: a result older than
   `ts + ttl` turns grey ("no data"), and one from more than `ttl` in the future turns grey ("clock mismatch"). If
   the checker can't be reached, the last results stay and age out by themselves, and one grey item says "unreachable".
-- Anything it can't read (an invalid result, a duplicate `id`, an unsupported spec version, an unknown level) is
-  shown grey, never dropped.
+- Anything it can't read (an invalid result, a duplicate `id`, an unknown level) is shown grey, never dropped. If the
+  whole answer is unusable (not a valid document, or an unsupported spec version), the last valid results stay and
+  age out, plus one grey item.
+- A valid document without results is grey ("no checks reported"), not "All OK".
+- If MagicMirror's node_helper has been silent for more than 3 fetch intervals, one grey item says so.
 
 ## Licence
 

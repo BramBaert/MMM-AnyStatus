@@ -136,10 +136,102 @@ test("document level: invalid, unsupported major, higher minor", () => {
 	assert.equal(minor[0].level, "ok"); // unknown fields ignored
 });
 
-test("an empty document gives no items", () => {
-	assert.deepEqual(S.evaluateDocument(doc([]), NOW), []);
+test("an empty document is one grey 'no checks reported', never all fine", () => {
+	const items = S.evaluateDocument(doc([], { source: "home-checker" }), NOW);
+	assert.equal(items.length, 1);
+	assert.equal(items[0].level, "unknown");
+	assert.equal(items[0].summary, "no checks reported");
+	assert.equal(items[0].label, "home-checker");
+	assert.equal(items[0].system, true);
+	assert.equal(S.arrange(items, 6).level, "unknown");
 });
 
+test("age rule comes before an unknown level", () => {
+	const item = S.evaluateResult(result({ level: "panic", ts: "2026-11-11T13:00:00Z", ttl: 60 }), NOW);
+	assert.equal(item.summary, "no data");
+	const future = S.evaluateResult(result({ level: "panic", ts: "2026-11-11T16:00:00Z", ttl: 60 }), NOW);
+	assert.equal(future.summary, "clock mismatch");
+});
+
+test("documentProblem: only document-level problems count", () => {
+	assert.equal(S.documentProblem(doc([])), null);
+	assert.equal(S.documentProblem(doc([null, { id: "x" }])), null);
+	assert.equal(S.documentProblem({ spec: "2.0", results: [] }), "unsupported spec 2.0");
+	assert.match(S.documentProblem({ spec: "1.0" }), /^invalid document/);
+});
+
+test("buildItems: an invalid or unsupported answer keeps the last valid results and adds one grey item", () => {
+	const good = doc([result({ id: "a" })], { source: "home-checker" });
+	let feed = S.acceptAnswer(null, { doc: good });
+	assert.equal(feed.lastValid, good);
+	for (const [bad, summary] of [[{ spec: "2.0", results: [] }, "unsupported spec 2.0"], [{ nope: 1 }, "invalid document: no valid spec"], [null, "invalid document: not an object"]]) {
+		const after = S.acceptAnswer(feed, { doc: bad });
+		assert.equal(after.lastValid, good);
+		const items = S.buildItems(after, NOW);
+		assert.equal(items.length, 2);
+		assert.equal(items[0].id, "a");
+		assert.equal(items[0].level, "ok");
+		assert.equal(items[1].level, "unknown");
+		assert.equal(items[1].summary, summary);
+		assert.equal(items[1].system, true);
+		// the kept results age out by themselves
+		assert.equal(S.buildItems(after, NOW + 20 * MIN)[0].level, "unknown");
+	}
+	// a later valid answer replaces both
+	feed = S.acceptAnswer(S.acceptAnswer(feed, { doc: { spec: "2.0", results: [] } }), { doc: doc([result({ id: "b" })]) });
+	assert.deepEqual(S.buildItems(feed, NOW).map((i) => i.id), ["b"]);
+});
+
+test("buildItems: an invalid answer with nothing valid before is just the grey item", () => {
+	const feed = S.acceptAnswer(null, { doc: { spec: "2.0", source: "home-checker", results: [] } });
+	const items = S.buildItems(feed, NOW);
+	assert.equal(items.length, 1);
+	assert.equal(items[0].label, "home-checker");
+	assert.equal(items[0].summary, "unsupported spec 2.0");
+});
+
+test("a document with some invalid results is still valid and is kept", () => {
+	const feed = S.acceptAnswer(null, { doc: doc([result({ id: "a" }), { id: "b" }]) });
+	assert.equal(S.documentProblem(feed.doc), null);
+	assert.equal(feed.lastValid, feed.doc);
+});
+
+test("acceptAnswer: an error keeps the last valid document and clears the invalid answer", () => {
+	const good = doc([result({ id: "a" })], { source: "home-checker" });
+	let feed = S.acceptAnswer(S.acceptAnswer(null, { doc: good }), { doc: { spec: "2.0", results: [] } });
+	feed = S.acceptAnswer(feed, { error: { message: "unreachable: down", lastSuccess: 1, firstFailure: 2 } });
+	assert.deepEqual(S.buildItems(feed, NOW).map((i) => i.label), ["a", "home-checker unreachable"]);
+});
+
+test("buildItems: watchdog adds a grey item after more than 3 fetch intervals of silence", () => {
+	const feed = S.acceptAnswer(null, { doc: doc([result({ id: "a", ttl: 100000 })]) });
+	const interval = 60 * 1000;
+	const lastFeedAt = NOW - 3 * interval;
+	assert.equal(S.buildItems(feed, NOW, { lastFeedAt, fetchInterval: interval }).length, 1); // exactly 3: not yet
+	const items = S.buildItems(feed, NOW + 1, { lastFeedAt, fetchInterval: interval });
+	assert.equal(items.length, 2);
+	assert.equal(items[0].level, "ok"); // results kept
+	assert.equal(items[1].level, "unknown");
+	assert.equal(items[1].system, true);
+	assert.match(items[1].summary, /no answer from MagicMirror's node_helper/);
+	assert.equal(items[1].since, lastFeedAt);
+	// before anything arrived: waiting plus the watchdog
+	const none = S.buildItems(null, NOW, { lastFeedAt: NOW - 4 * interval, fetchInterval: interval });
+	assert.deepEqual(none.map((i) => i.summary), ["no data yet", "no answer from MagicMirror's node_helper"]);
+	// no watch given: no watchdog
+	assert.equal(S.buildItems(feed, NOW + 99 * interval).length, 1);
+});
+
+test("arrange: a missing, NaN or negative maxItems falls back to 6", () => {
+	const seven = Array.from({ length: 7 }, (_, i) => item("warn", `w${i}`, i, "g"));
+	const six = seven.slice(0, 6);
+	for (const bad of [undefined, null, NaN, -1, "abc", {}]) {
+		assert.equal(S.arrange(six, bad).cards.length, 6, String(bad));
+		assert.equal(S.arrange(seven, bad).cards.length, 0, String(bad));
+	}
+	assert.equal(S.arrange(seven, "7").cards.length, 7);
+	assert.equal(S.arrange(seven, 0).cards.length, 0);
+});
 test("buildItems: nothing yet is a grey 'no data yet'", () => {
 	for (const feed of [null, {}, { doc: null, error: null }]) {
 		const items = S.buildItems(feed, NOW);
