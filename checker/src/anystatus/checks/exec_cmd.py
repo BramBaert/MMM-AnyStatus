@@ -15,6 +15,8 @@ import signal
 import subprocess
 import sys
 import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from anystatus.checks.base import Check, register
 from anystatus.errors import mask
@@ -88,6 +90,52 @@ def _kill(proc: subprocess.Popen[bytes]) -> None:
         proc.kill()
 
 
+@dataclass(frozen=True)
+class ProcessResult:
+    code: int
+    stdout: str
+    stderr: str  # masked and stripped; for the debug log only, never for a summary
+    truncated: bool  # the process wrote more to stdout than `limit` bytes
+
+
+def run_process(
+    command: Sequence[str], env: dict[str, str], timeout: float, limit: int, secrets: Sequence[str] = ()
+) -> ProcessResult:
+    """Run a command without a shell and wait for it. A timeout kills it (and what it started) and raises
+    CheckFailure; so does a command that can't be started. `limit` bytes of each output stream are kept."""
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    try:
+        proc = subprocess.Popen(  # no shell: the command is a list
+            list(command),
+            shell=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            creationflags=flags,
+            start_new_session=sys.platform != "win32",
+        )
+    except FileNotFoundError as exc:
+        raise CheckFailure("command not found", detail=str(exc)) from exc
+    except OSError as exc:
+        raise CheckFailure("cannot run the command", detail=f"{type(exc).__name__}: {exc}") from exc
+
+    assert proc.stdout is not None and proc.stderr is not None
+    out, err = _Drain(proc.stdout, limit), _Drain(proc.stderr, limit)
+    try:
+        code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill(proc)
+        proc.wait()
+        out.thread.join(_DRAIN_GRACE)
+        err.thread.join(_DRAIN_GRACE)
+        log.debug("exec: stderr after the timeout: %s", mask(err.text(), secrets))
+        raise CheckFailure(f"timed out after {timeout:g} s") from None
+    out.thread.join(_DRAIN_GRACE)
+    err.thread.join(_DRAIN_GRACE)
+    return ProcessResult(code, out.text(), mask(err.text(), secrets).strip(), len(out.data) >= limit)
+
+
 @register
 class Exec(Check):
     type_name = "exec"
@@ -127,44 +175,15 @@ class Exec(Check):
     def run(self, timeout: float) -> Observation:
         env = self._environment()
         secrets = [v for v in env.values() if v]
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-        try:
-            proc = subprocess.Popen(  # no shell: the command is a list
-                self.command,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-                creationflags=flags,
-                start_new_session=sys.platform != "win32",
-            )
-        except FileNotFoundError as exc:
-            raise CheckFailure("command not found", detail=str(exc)) from exc
-        except OSError as exc:
-            raise CheckFailure("cannot run the command", detail=f"{type(exc).__name__}: {exc}") from exc
-
-        assert proc.stdout is not None and proc.stderr is not None
-        out, err = _Drain(proc.stdout, MAX_OUTPUT), _Drain(proc.stderr, MAX_OUTPUT)
-        try:
-            code = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            _kill(proc)
-            proc.wait()
-            out.thread.join(_DRAIN_GRACE)
-            err.thread.join(_DRAIN_GRACE)
-            log.debug("exec: stderr after the timeout: %s", mask(err.text(), secrets))
-            raise CheckFailure(f"timed out after {timeout:g} s") from None
-        out.thread.join(_DRAIN_GRACE)
-        err.thread.join(_DRAIN_GRACE)
-        stderr_text = mask(err.text(), secrets).strip()
+        done = run_process(self.command, env, timeout, MAX_OUTPUT, secrets)
+        code, stdout, stderr_text = done.code, done.stdout, done.stderr
         if stderr_text:
             log.debug("exec %s: stderr: %s", os.path.basename(self.command[0]), stderr_text)
 
         if code not in _LEVELS:
             how = f"killed by signal {-code}" if code < 0 else f"exit code {code}"
             raise CheckFailure(how, detail=f"{how}; stderr: {stderr_text}" if stderr_text else how)
-        summary, value, unit = parse_plugin_output(out.text())
+        summary, value, unit = parse_plugin_output(stdout)
         level = _LEVELS[code]
         if not summary and level != "ok":
             summary = f"no output (exit code {code})"
