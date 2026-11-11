@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/BramBaert/MMM-AnyStatus/schema/results-1.schema.json",
+  "title": "MMM-AnyStatus results document, spec 1.x",
+  "description": "Shape only. SPEC.md has the rules a schema can't express: an offset on every time, since not after ts, unique ids, and the age rule.",
+  "type": "object",
+  "required": ["spec", "results"],
+  "properties": {
+    "spec": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "source": { "type": "string", "minLength": 1 },
+    "results": { "type": "array", "items": { "$ref": "#/$defs/result" } }
+  },
+  "$defs": {
+    "time": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "result": {
+      "type": "object",
+      "required": ["id", "level", "ts", "ttl"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+        "level": { "type": "string", "enum": ["ok", "warn", "crit", "unknown"] },
+        "ts": { "$ref": "#/$defs/time" },
+        "ttl": { "type": "number", "exclusiveMinimum": 0 },
+        "label": { "type": "string", "minLength": 1 },
+        "group": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" },
+        "value": { "type": ["number", "string"] },
+        "unit": { "type": "string" },
+        "since": { "$ref": "#/$defs/time" }
+      }
+    }
+  }
+}
