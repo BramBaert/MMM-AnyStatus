@@ -1,4 +1,4 @@
-﻿"""Check types. Importing this package registers them all."""
+"""Check types. Importing this package registers them all."""
 
 from anystatus.checks import (  # noqa: F401  (registration)
     http,
