@@ -11,14 +11,14 @@ Python 3.11 or newer, standard library only in the core. Database drivers are ex
 ```sh
 cd checker
 uv sync                                          # installs the checker and its dev tools into .venv
-uv run examples/update_demo_db.py                # creates examples/demo.sqlite with a fresh heartbeat
+uv run examples/update_demo_db.py                # creates examples/demo.sqlite and demo_result.json, fresh (add --loop to keep them so)
 uv run anystatus-checker validate examples/config.toml
 uv run anystatus-checker once examples/config.toml    # run every check once, print the document
 uv run anystatus-checker run examples/config.toml     # the service; stop with Ctrl+C
 ```
 
 Then open <http://127.0.0.1:8099/> (a readable overview) or fetch <http://127.0.0.1:8099/results> (the JSON). The
-example config has five checks:
+example config has eight checks:
 
 | Check | What it shows |
 |---|---|
@@ -27,6 +27,9 @@ example config has five checks:
 | `demo.nightly` | `sql_age` on data that is 3 days old on purpose: red. The time has no offset, so `timezone` says which clock wrote it |
 | `custom.disk` | the `python` type: your function (`examples/my_checks.py`) returns a number |
 | `http.self` | the `http` type, asking this checker's own `/results` (green under `run`; `once` serves nothing, so it says "connection refused" there) |
+| `disk.examples` | the `disk` type on the examples folder |
+| `file.demo` | `file_age` on `examples/demo.sqlite`: green while the loop writes, then amber, then red |
+| `demo.job` | `result_file`: reads `examples/demo_result.json`, which the same script rewrites; stop it and the card turns grey after 90 s |
 
 Point the MagicMirror module at it: `checkerUrl: "http://127.0.0.1:8099"`.
 
@@ -115,6 +118,100 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   ```
 - **`python`**: `function = "module:function"`, optional `path`; the function gets the other keys as a dict and returns
   a number or `anystatus.Observation(level=..., summary=..., value=..., unit=...)`. May be `async`.
+
+- **`file_age`**: the age of the newest file that matches the glob `path` (`**` works). No match is `crit` ("no file
+  matches"), also when the folder is gone (a mount that isn't there); a folder that exists but can't be read is
+  `unknown`. `min_size` ignores smaller files (a failed run leaves a stub): plain bytes or decimal units, `"500KB"`,
+  `"1MB"`, `"2GB"` (KB = 1000 bytes). Limits are durations. Placeholder `{file}` is the newest file's name. A relative
+  `path` is relative to the config file.
+
+  ```toml
+  [[check]]
+  id = "backup.offsite"
+  type = "file_age"
+  label = "Offsite copy"
+  path = "/mnt/offsite/backups/*.tar.zst"
+  min_size = "1MB"
+  warn = "8d"
+  crit = "15d"
+  ```
+
+- **`disk`**: used % of the filesystem behind `path`, worse above, amber at 85 and red at 95 unless you set limits. The
+  percentage is what `df` shows (of what a normal user can use). `measure = "free"` reports the free space in GB
+  instead: worse below, no default limits. A path that isn't there is `unknown`. In a container the path is a mounted
+  volume and the numbers are those of the filesystem behind it. Placeholder `{free}` (GB).
+
+  ```toml
+  [[check]]
+  id = "disk.nas"
+  type = "disk"
+  label = "NAS disk"
+  path = "/mnt/nas"
+
+  [[check]]
+  id = "disk.nas.free"
+  type = "disk"
+  path = "/mnt/nas"
+  measure = "free"
+  warn = 100              # GB
+  crit = 20
+  ```
+
+- **`exec`**: runs `command`, a list of strings **without a shell** (a string is a config error), as a Nagios plugin: exit
+  0, 1, 2, 3 are `ok`, `warn`, `crit`, `unknown`, any other exit code is `unknown` ("exit code 4"). The first output
+  line up to `|` is the summary; the first performance value after it (`time=0.12s;1;2`) is the value and unit. The
+  plugin's own thresholds win, so `warn` and `crit` are a config error. A run longer than `timeout` is killed (with
+  its process group where the OS allows) and is `unknown` ("timed out after 10 s"). **Only the environment variables
+  listed in `env` are passed on, and only if they are set: `PATH` too** (give the command as an absolute path; on
+  Windows list `SYSTEMROOT` if the program needs it). At most 64 KB of the output is read; stderr goes to the debug
+  log only (`-v`), with the listed variables' values masked, never into the summary.
+
+  ```toml
+  [[check]]
+  id = "smart.sda"
+  type = "exec"
+  label = "Disk sda health"
+  command = ["/usr/lib/nagios/plugins/check_ide_smart", "-d", "/dev/sda"]
+  env = ["SMART_TOKEN"]
+  interval = "1h"
+  ```
+
+- **`system`**: Linux only, read from `/proc` and `/sys`. `measure` is `temperature` (°C, the highest thermal zone, or
+  `zone = "thermal_zone0"`), `load` (1-minute load average divided by the number of CPUs), `memory` (used % from
+  MemTotal and MemAvailable; **if a cgroup v2 memory limit (`memory.max`) below the machine's memory applies, that
+  limit is used instead**, as in a container with `mem_limit`) or `uptime` (a duration; limits such as `"30d"`, use
+  `worse = "below"` to catch a recent reboot). On another system, or without the sensor, it is `unknown` ("system
+  checks only work on Linux", "no temperature sensor"), not a config error, so the same config still loads on a
+  laptop. In a container it reports the host's temperature and load, but its own memory limit.
+
+  ```toml
+  [[check]]
+  id = "pi.temp"
+  type = "system"
+  label = "Pi temperature"
+  measure = "temperature"
+  warn = 70
+  crit = 80
+  ```
+
+- **`result_file`**: reads the file `path`, in which another program (any language) writes a
+  [SPEC](../SPEC.md) result, or a whole document, and serves what it says. The file's `level`, `summary`, `value`,
+  `unit`, `since`, `ts` and `ttl` are passed on as they are: **not debounced and not re-stamped**, so a job that stops
+  writing turns grey on time. A single result is served under the check's `id`; the results of a document under
+  `<check id>/<their id>` (at most 128 characters in all). `label` and `group` default to the check's. A result that is
+  invalid (no `ts` or `ttl`, a time without an offset, a bad level, an id used twice, ...) is shown as `unknown` with
+  "invalid in file: <reason>", `ts` = when the file was read, `ttl` = the check's. A missing or unreadable file, one
+  that is not JSON, larger than 1 MB, or with an unsupported `spec` (`2.0`) is one `unknown` result under the
+  check's `id`, which does go through `confirm`. `warn`, `crit`, `worse` and `summary` are a config error. Have the
+  writer rename a finished file into place, so nobody reads half of it.
+
+  ```toml
+  [[check]]
+  id = "jobs.nightly"
+  type = "result_file"
+  label = "Nightly jobs"
+  path = "/var/lib/nightly/status.json"
+  ```
 
 - **`mqtt`**: a device that publishes a heartbeat or a state. Needs the `mqtt` extra
   (`uv add "mmm-anystatus-checker[mqtt]"`, or `uv sync --extra mqtt` in a checkout). Brokers are a table, shared by

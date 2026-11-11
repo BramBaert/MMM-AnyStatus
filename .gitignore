@@ -231,3 +231,6 @@ dev/basepath.js
 
 # The checker's example data and memory files (made by checker/examples)
 checker/examples/*.sqlite*
+
+# the result file that checker/examples/update_demo_db.py writes
+checker/examples/demo_result.json*
