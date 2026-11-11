@@ -144,8 +144,9 @@ It has to be easy for other people:
 
 ## Open
 
-- **MQTT in v1 at all?** Proposal: no. A job that has to report itself (push) sends an HTTP POST to the checker's
-  port, in the same format as a result.
+- **MQTT as the transport in v1?** Proposal: no. A job that has to report itself (push) sends an HTTP POST to the
+  checker's port, in the same format as a result. **MQTT as a source** is a different matter: a device's heartbeat
+  or state on a topic is a status where it lives, so it gets a check type (`mqtt` in [checker.md](checker.md)).
 - **Read-only Docker access** (above).
 - **Limits in `config.js`** instead of the checker, for users who only want MMM-MysqlQuery-style checks? Not in v1.
 - **Touch screens:** tap to expand a card? Not in v1.

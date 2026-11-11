@@ -186,6 +186,8 @@ the container itself.
 | `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
 | `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
 | `result_file` *(proposed)* | as the file says | | | | 4 |
+| `mqtt` *(proposed)* | age of the last message, a value from it, or a level it names | above | none | `mqtt` extra, a broker | 4 |
+| `system` *(proposed)* | temperature, load, memory used | above | none | Linux | 4 |
 | `systemd` *(proposed)* | | | | systemd on the host | later |
 | `dns` *(proposed)* | lookup time, ms | above | none; no answer is `crit` | | later |
 
@@ -501,7 +503,91 @@ Resolves a name and optionally compares the answer (`expect = ["192.0.2.10"]`); 
 standard library can only ask the system's resolver, so asking a *specific* server (is the Pi-hole answering?) needs
 an extra (`dnspython`).
 
-### Not planned as types
+### `mqtt` (proposed, step 4)
 
-Load, memory, temperatures, SMART: good Nagios plugins already exist, so `exec` covers them. MQTT stays out
-(design.md).
+MQTT as a **source**: a device or service that publishes a heartbeat or a state. (design.md keeps MQTT out as the
+*transport* to the display; that is a different question.)
+
+```toml
+[mqtt.home]                         # a broker; every mqtt check names one, and they share its connection
+host = "broker.example"
+port = 8883                         # 1883 without TLS
+tls = true
+username = "anystatus"
+password_env = "MQTT_PASSWORD"
+
+[[check]]
+id = "boiler.heartbeat"
+type = "mqtt"
+label = "Boiler controller"
+broker = "home"
+topic = "boiler/heartbeat"
+interval = "30s"                    # how often the age is evaluated, not how often the device sends
+warn = "3m"
+crit = "10m"
+
+[[check]]
+id = "freezer.temp"
+type = "mqtt"
+label = "Freezer"
+broker = "home"
+topic = "freezer/state"
+json = "temperature"                # a value from the payload, compared with the limits
+warn = -15
+crit = -10
+max_age = "15m"                     # no message for this long is `crit` ("silent for 20 min")
+
+[[check]]
+id = "plug.status"
+type = "mqtt"
+label = "Garage plug"
+broker = "home"
+topic = "plug/garage/LWT"
+levels = { Online = "ok", Offline = "crit" }   # the payload names the level (Last Will messages)
+```
+
+Three ways to read a topic:
+
+- **Heartbeat** (no `json`, no `levels`): the value is the age of the last message. "Is it still alive?"
+- **Value** (`json` or a plain numeric payload): the value comes from the last message, with the usual limits.
+  `max_age` adds the heartbeat rule on top.
+- **Level** (`levels`): the payload maps to a level. A payload not in the table is `unknown` ("unexpected payload
+  'Rebooting'").
+
+Rules:
+
+- **Retained messages don't count as a heartbeat.** At subscribe, a broker hands over the last retained message at
+  once, with no time on it. Counting it would make a dead device look alive on every checker restart (the trap
+  design.md warns about). A retained message *is* used for its content (the payload, the level), and for its time
+  only if the payload carries one (`time_json = "ts"`).
+- **The last message's time and payload are kept in the SQLite memory.** A restart then doesn't reset a heartbeat's
+  age to zero or forget a state. They are kept only within the [continuity rule](#memory-the-sqlite-file).
+- **A broker the checker can't reach** makes its checks `unknown` ("broker home unreachable"), debounced by `confirm`
+  like any failure. Reconnecting is automatic, with backoff.
+- `ts` is when the check was evaluated, as for every check. The message time feeds the value, never `ts`.
+- Needs the `mqtt` extra (paho-mqtt), since a subscribe client isn't in the standard library. It is a new kind of
+  check: a listener that runs all the time next to periodic evaluation. The step 3 structure has to leave room for
+  that.
+- **Later:** wildcard topics (`sensors/+/heartbeat`), where the value is the number of silent devices and the
+  summary names them.
+
+### `system` (proposed, step 4)
+
+```toml
+[[check]]
+id = "pi.temp"
+type = "system"
+label = "Pi temperature"
+measure = "temperature"   # or "load" (1-min load per CPU), "memory" (used %), "uptime"
+warn = 70
+crit = 80
+```
+
+Linux only, read from `/proc` and `/sys`, standard library. Covers the questions everyone asks of their own Pi
+without needing Nagios plugins. In a container it reports the container's view (the host's temperature and load,
+the container's memory limit if one is set). The docs say so.
+
+### Through `exec` rather than a type of their own
+
+SMART disk health, RAID state, UPS: these need root or vendor tools, and good Nagios plugins exist for them
+(`check_smart`, `check_md_raid`, `check_nut`).
