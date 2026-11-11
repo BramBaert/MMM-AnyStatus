@@ -87,3 +87,37 @@ test("schema and module agree on which results are well-formed", () => {
 		assert.equal(!schemaOk, flagged, `${name}: schema ${schemaOk ? "accepts" : "rejects"}, module ${flagged ? "flags" : "accepts"} it`);
 	}
 });
+
+// The demo scenarios (examples/hand-written/scenarios): serve.py turns `x-demo-age` / `x-demo-since` into ts / since.
+const scenarioNow = Date.parse("2026-11-11T14:03:00Z");
+function scenario(name) {
+	const doc = JSON.parse(read("examples", "hand-written", "scenarios", `${name}.json`));
+	for (const r of doc.results) {
+		if ("x-demo-age" in r) r.ts = new Date(scenarioNow - r["x-demo-age"] * 1000).toISOString();
+		if ("x-demo-since" in r) r.since = new Date(scenarioNow - r["x-demo-since"] * 1000).toISOString();
+	}
+	return doc;
+}
+
+test("the valid demo scenarios are valid against the schema", () => {
+	for (const name of ["all-ok", "mixed", "many", "stale", "empty"]) {
+		assert.ok(validate(scenario(name)), `${name}: ${JSON.stringify(validate.errors)}`);
+	}
+});
+
+test("the demo scenarios show the states they are named for", () => {
+	const levels = (name) => S.evaluateDocument(scenario(name), scenarioNow).map((i) => i.level);
+	assert.deepEqual([...new Set(levels("all-ok"))], ["ok"]);
+	assert.deepEqual([...new Set(levels("mixed"))].sort(), ["crit", "ok", "unknown", "warn"]);
+	const many = S.evaluateDocument(scenario("many"), scenarioNow);
+	assert.ok(many.filter((i) => i.level !== "ok").length >= 9);
+	assert.ok(new Set(many.map((i) => i.group)).size >= 4 && many.some((i) => i.group === null));
+	const stale = S.evaluateDocument(scenario("stale"), scenarioNow);
+	assert.deepEqual(stale.map((i) => i.summary), ["no data", "no data", "no data", "clock mismatch"]);
+	assert.deepEqual(S.evaluateDocument(scenario("empty"), scenarioNow).map((i) => i.summary), ["no checks reported"]);
+	assert.match(S.evaluateDocument(scenario("unsupported"), scenarioNow)[0].summary, /^unsupported spec 2\.0/);
+	const invalid = S.evaluateDocument(scenario("invalid"), scenarioNow).map((i) => i.summary);
+	assert.ok(invalid.some((s) => s.startsWith("invalid result: no ttl")));
+	assert.ok(invalid.some((s) => s.startsWith("invalid result: bad ts")));
+	assert.ok(invalid.some((s) => s.startsWith("unknown level")));
+});

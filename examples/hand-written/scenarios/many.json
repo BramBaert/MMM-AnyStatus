@@ -1,0 +1,21 @@
+{
+  "spec": "1.0",
+  "source": "demo: many",
+  "results": [
+    { "id": "network.1", "label": "Router", "group": "network", "level": "warn", "summary": "Router needs a look", "ttl": 900, "x-demo-age": 10, "x-demo-since": 3600 },
+    { "id": "network.2", "label": "Printer", "group": "network", "level": "unknown", "summary": "Printer needs a look", "ttl": 900, "x-demo-age": 20, "x-demo-since": 7200 },
+    { "id": "network.3", "label": "Switch", "group": "network", "level": "crit", "summary": "Switch needs a look", "ttl": 900, "x-demo-age": 30, "x-demo-since": 10800 },
+    { "id": "network.4", "label": "Access point", "group": "network", "level": "warn", "summary": "Access point needs a look", "ttl": 900, "x-demo-age": 40, "x-demo-since": 14400 },
+    { "id": "docker.5", "label": "Image updates", "group": "docker", "level": "unknown", "summary": "Image updates needs a look", "ttl": 900, "x-demo-age": 50, "x-demo-since": 18000 },
+    { "id": "docker.6", "label": "Container restarts", "group": "docker", "level": "crit", "summary": "Container restarts needs a look", "ttl": 900, "x-demo-age": 60, "x-demo-since": 21600 },
+    { "id": "docker.7", "label": "Disk usage", "group": "docker", "level": "warn", "summary": "Disk usage needs a look", "ttl": 900, "x-demo-age": 70, "x-demo-since": 25200 },
+    { "id": "backups.8", "label": "NAS backup", "group": "backups", "level": "unknown", "summary": "NAS backup needs a look", "ttl": 900, "x-demo-age": 80, "x-demo-since": 28800 },
+    { "id": "backups.9", "label": "Cloud backup", "group": "backups", "level": "crit", "summary": "Cloud backup needs a look", "ttl": 900, "x-demo-age": 90, "x-demo-since": 32400 },
+    { "id": "backups.10", "label": "Offsite copy", "group": "backups", "level": "warn", "summary": "Offsite copy needs a look", "ttl": 900, "x-demo-age": 100, "x-demo-since": 36000 },
+    { "id": "home.11", "label": "Garage sensor", "group": "home", "level": "unknown", "summary": "Garage sensor needs a look", "ttl": 900, "x-demo-age": 110, "x-demo-since": 39600 },
+    { "id": "home.12", "label": "Door open", "group": "home", "level": "crit", "summary": "Door open needs a look", "ttl": 900, "x-demo-age": 120, "x-demo-since": 43200 },
+    { "id": "home.13", "label": "Smoke alarm", "group": "home", "level": "warn", "summary": "Smoke alarm needs a look", "ttl": 900, "x-demo-age": 130, "x-demo-since": 46800 },
+    { "id": "weather.feed", "label": "Weather feed", "level": "crit", "summary": "no answer", "ttl": 900, "x-demo-age": 15, "x-demo-since": 600 },
+    { "id": "ping.nas", "label": "NAS", "group": "network", "level": "ok", "ttl": 180, "x-demo-age": 20 }
+  ]
+}

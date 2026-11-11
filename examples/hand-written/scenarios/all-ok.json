@@ -1,0 +1,10 @@
+{
+  "spec": "1.0",
+  "source": "demo: all ok",
+  "results": [
+    { "id": "ping.router", "label": "Router", "group": "network", "level": "ok", "value": 1.8, "unit": "ms", "ttl": 180, "x-demo-age": 20, "x-demo-since": 864000 },
+    { "id": "ping.printer", "label": "Printer", "group": "network", "level": "ok", "ttl": 180, "x-demo-age": 40, "x-demo-since": 400000 },
+    { "id": "tls.example", "label": "Certificate example.test", "group": "network", "level": "ok", "value": 61, "unit": "days left", "ttl": 86400, "x-demo-age": 3600, "x-demo-since": 5000000 },
+    { "id": "backup.nas", "label": "NAS backup", "group": "backups", "level": "ok", "summary": "last backup 6 hours ago", "ttl": 900, "x-demo-age": 60, "x-demo-since": 200000 }
+  ]
+}

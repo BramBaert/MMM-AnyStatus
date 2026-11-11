@@ -1,0 +1,10 @@
+{
+  "spec": "1.0",
+  "source": "demo: stale",
+  "results": [
+    { "id": "ping.router", "label": "Router", "group": "network", "level": "ok", "ttl": 180, "x-demo-age": 900, "x-demo-since": 864000 },
+    { "id": "backup.nas", "label": "NAS backup", "group": "backups", "level": "crit", "summary": "last backup 3 days ago", "ttl": 900, "x-demo-age": 7200, "x-demo-since": 266400 },
+    { "id": "docker.updates", "label": "Image updates", "group": "docker", "level": "warn", "summary": "3 images", "ttl": 3600, "x-demo-age": 86400 },
+    { "id": "clock.skew", "label": "Sensor with a wrong clock", "group": "home", "level": "ok", "ttl": 300, "x-demo-age": -7200 }
+  ]
+}

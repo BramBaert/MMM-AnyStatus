@@ -1,4 +1,4 @@
-﻿# MMM-AnyStatus
+# MMM-AnyStatus
 
 A calm status display for [MagicMirror²](https://magicmirror.builders/): a big **All OK** when everything is fine,
 otherwise only what needs attention, with the reason and how long it has been like that.
@@ -47,7 +47,9 @@ uv run --no-project --python 3.14 examples/hand-written/serve.py --demo
 Point `checkerUrl` at `http://localhost:8099`. `--demo` shifts the times in the file on every request so that the
 display shows all four levels (plus one deliberately stale result, which shows grey). A real producer never does
 that: `ts` is when a check *ran*. Without `--demo` the file is served as it is, and goes grey once its `ttl` has
-run out.
+run out. With --demo the server also has one URL per display state, e.g.
+http://localhost:8099/scenario/many as checkerUrl (all-ok, mixed, many, stale, invalid, empty, unsupported,
+unreachable, rotate).
 
 To see it in a real MagicMirror without installing anything but Docker, see [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -1,4 +1,4 @@
-﻿# Contributing
+# Contributing
 
 Node is not needed on your machine: everything runs in Docker (Docker Desktop or Docker Engine with Compose).
 The module has no runtime dependencies; ESLint and Ajv (used by the tests to check the schema) are dev dependencies.
@@ -19,7 +19,11 @@ that the example in `SPEC.md`, `schema/results-1.schema.json` and the demo resul
 docker compose -f compose.dev.yaml up magicmirror
 ```
 
-Then open <http://localhost:8080>. This starts the demo results server (`examples/hand-written/serve.py --demo`) and
+Then open <http://localhost:8080>: one page with an instance of the module per display state, each with a header naming its
+scenario (all OK, mixed, many/collapsed groups, stale and clock mismatch, invalid results, empty, unsupported spec,
+unreachable, and one that rotates through all of them every 20 s). The scenarios are the files in
+examples/hand-written/scenarios/ (times are relative to now: x-demo-age and x-demo-since, in seconds, which
+serve.py --demo turns into 	s and since); the page is dev/config.js. This starts the demo results server (`examples/hand-written/serve.py --demo`) and
 MagicMirror (server only, image pinned in `compose.dev.yaml`) with this folder mounted as
 `modules/MMM-AnyStatus` and `dev/config.js` as its config. Edit the module, reload the browser; a change to
 `node_helper.js` needs `docker compose -f compose.dev.yaml restart magicmirror`.

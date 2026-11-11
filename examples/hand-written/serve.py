@@ -7,10 +7,15 @@ GET /results answers with the file, as SPEC.md asks of a producer.
 A producer must not touch `ts` when it serves a result again, so a plain static file goes grey once its `ttl` has
 run out: that is the age rule working. Without --demo this server does exactly that.
 
---demo is for demos only, and not what a real producer does: on every request it shifts ALL times in the file
-(`ts` and `since`) by the same amount, so the newest `ts` equals "now". The ages between results stay as written,
-so the display shows every level, and "Garage sensor" (written 4 hours older than the rest, with a 15 minute ttl)
-is deliberately stale and shows grey.
+--demo is for demos only, and not what a real producer does:
+- /results: on every request it shifts ALL times in the file (`ts` and `since`) by the same amount, so the newest
+  `ts` equals "now". The ages between results stay as written, so the display shows every level, and "Garage sensor"
+  (written 4 hours older than the rest, with a 15 minute ttl) is deliberately stale and shows grey.
+- /scenario/<name>/results: one of the files in scenarios/, each showing one state of the display. Their results have
+  no real times but the demo-only fields `x-demo-age` (seconds since the check ran; negative = in the future) and
+  `x-demo-since` (seconds since the level last changed), which become `ts` and `since` on every request (SPEC.md
+  reserves `x-` fields for a producer's own use; consumers ignore them). Scenarios: all-ok, mixed, many, stale,
+  invalid, empty, unsupported, unreachable (HTTP 503), and rotate (a new one of those every 20 seconds).
 """
 
 import argparse
@@ -20,6 +25,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 TIME_FIELDS = ("ts", "since")
+SCENARIO_DIR = Path(__file__).with_name("scenarios")
+ROTATE_SECONDS = 20
+ROTATION =("all-ok", "mixed", "many", "stale", "invalid", "empty", "unsupported", "unreachable")
 
 
 def parse_time(text: str) -> datetime:
@@ -42,6 +50,29 @@ def shift_to_now(document: dict) -> dict:
     return document
 
 
+def materialize(document: dict, now: datetime) -> dict:
+    """DEMO ONLY: turn `x-demo-age` and `x-demo-since` (seconds before now) into `ts` and `since`."""
+    for result in document.get("results", []):
+        for demo_field, field in (("x-demo-age", "ts"), ("x-demo-since", "since")):
+            seconds = result.pop(demo_field, None)
+            if seconds is not None:
+                result[field] = format_time(now - timedelta(seconds=seconds))
+    return document
+
+
+def scenario_answer(name: str) -> tuple[int, bytes]:
+    """The status and body for a scenario name; "rotate" picks the current one of ROTATION."""
+    if name == "rotate":
+        name = ROTATION[int(datetime.now(timezone.utc).timestamp() // ROTATE_SECONDS) % len(ROTATION)]
+    if name == "unreachable":
+        return 503, b"service unavailable (demo scenario)\n"
+    path = SCENARIO_DIR / f"{name}.json"
+    if "/" in name or not path.is_file():
+        return 404, b"unknown scenario\n"
+    document = materialize(json.loads(path.read_text(encoding="utf-8")), datetime.now(timezone.utc))
+    return 200, json.dumps(document).encode()
+
+
 def make_handler(path: Path, demo: bool) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -50,6 +81,10 @@ def make_handler(path: Path, demo: bool) -> type[BaseHTTPRequestHandler]:
                 if demo:
                     document = shift_to_now(document)
                 self.reply(200, "application/json", json.dumps(document).encode())
+            elif demo and self.path.startswith("/scenario/") and self.path.split("?")[0].endswith("/results"):
+                name = self.path.split("?")[0][len("/scenario/") : -len("/results")]
+                status, body = scenario_answer(name)
+                self.reply(status, "application/json" if status == 200 else "text/plain; charset=utf-8", body)
             elif self.path == "/":
                 self.reply(200, "text/plain; charset=utf-8", b"Hand-written results server. See /results.\n")
             else:
