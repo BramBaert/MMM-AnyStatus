@@ -7,7 +7,7 @@
 "use strict";
 
 const NodeHelper = require("node_helper");
-const { createFetcher, createPoller, timeoutFor } =require("./lib/fetcher");
+const { createFetcher, createPoller, timeoutFor } = require("./lib/fetcher");
 
 module.exports = NodeHelper.create({
 	start() {
