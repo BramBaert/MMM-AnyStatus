@@ -11,7 +11,7 @@ from helpers import FakeClock, FakeLauncher, World, make_world
 
 from anystatus.document import Snapshot
 from anystatus.model import Observation
-from anystatus.scheduler import Scheduler, ThreadLauncher
+from anystatus.scheduler import HUNG_GRACE, Scheduler, ThreadLauncher
 
 
 def ok() -> Observation:
@@ -63,19 +63,21 @@ def test_a_run_that_times_out_is_a_failure_and_the_hung_thread_is_not_restarted(
 ) -> None:
     w = one_check('timeout = "10s"\nconfirm = 1')
     w.sched.tick()  # started, and never returns
-    w.clock.advance(9.9)
+    w.clock.advance(
+        10 + HUNG_GRACE - 0.1
+    )  # the check's own timeout passed; it gets a grace to report it itself
     w.sched.tick()
     assert w.result("c")["summary"] == "waiting for the first run"
     w.clock.advance(0.2)
     w.sched.tick()
     r = w.result("c")
     assert (r["level"], r["summary"]) == ("unknown", "timed out after 10 s")
-    assert r["ts"] == "2026-11-11T12:00:10Z"
+    assert r["ts"] == "2026-11-11T12:00:12Z"
     for _ in range(100):  # an hour and more: the interval passes many times
         w.clock.advance(60)
         w.sched.tick()
     assert w.launcher.count("c") == 1
-    assert w.result("c")["ts"] == "2026-11-11T12:00:10Z"  # it ages out, honestly
+    assert w.result("c")["ts"] == "2026-11-11T12:00:12Z"  # it ages out, honestly
     # when the thread does end, its late result is discarded and the check starts again
     w.launcher.complete("c", ok(), w.clock)
     w.sched.tick()

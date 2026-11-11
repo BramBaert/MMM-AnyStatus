@@ -245,7 +245,7 @@ name = "mmm-anystatus-checker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
+    { name = "tzdata" },
 ]
 
 [package.optional-dependencies]
@@ -268,7 +268,7 @@ dev = [
 requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
-    { name = "tzdata", marker = "sys_platform == 'win32'" },
+    { name = "tzdata" },
 ]
 provides-extras = ["mysql", "postgres"]
 

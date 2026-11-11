@@ -5,9 +5,9 @@ description = "The checker for MMM-AnyStatus: runs checks, decides their level, 
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-# The core is standard library only. tzdata is the one exception, and only on Windows, which ships no time zone
-# database (zoneinfo needs it for `timezone = "Europe/Brussels"`).
-dependencies = ["tzdata; sys_platform == 'win32'"]
+# The core is standard library only. tzdata is the one exception: zoneinfo needs a time zone database for
+# `timezone = "Europe/Brussels"`, and Windows as well as many slim/Alpine images have none. It is data, no code.
+dependencies = ["tzdata"]
 
 [project.optional-dependencies]
 mysql = ["PyMySQL>=1.1"]

@@ -31,6 +31,9 @@ if TYPE_CHECKING:
 log = logging.getLogger("anystatus")
 
 START_SPREAD = 5.0  # seconds over which the first runs are spread
+# A run counts as hung this long after its own timeout: a check that honours its timeout reports its own, more
+# telling failure ("query timed out") before the scheduler gives up on it.
+HUNG_GRACE = 2.0
 WAITING = "waiting for the first run"
 
 
@@ -217,7 +220,7 @@ class Scheduler:
                     )
                     slot.handle = None
                     changed = True
-                elif mono - slot.started >= slot.spec.timeout:
+                elif mono - slot.started >= slot.spec.timeout + HUNG_GRACE:
                     slot.zombie, slot.handle = handle, None
                     self._finish(slot, Failure(f"timed out after {slot.spec.timeout:g} s"), self.clock.now())
                     changed = True
@@ -234,7 +237,7 @@ class Scheduler:
         wait = cap
         for slot in self.slots:
             if slot.handle is not None:
-                wait = min(wait, slot.started + slot.spec.timeout - mono)
+                wait = min(wait, slot.started + slot.spec.timeout + HUNG_GRACE - mono)
             elif slot.zombie is None:
                 wait = min(wait, slot.next_due - mono)
         return max(0.0, wait)
