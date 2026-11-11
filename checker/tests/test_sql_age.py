@@ -200,10 +200,3 @@ def test_server_urls_are_parsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
     with pytest.raises(ValueError, match="password_env"):
         parse_database_url("sqlite:x.db", "pw", tmp_path)
-
-
-@pytest.mark.skip(
-    reason="needs a real MariaDB/PostgreSQL server and the extras; run by hand (see checker/README.md)"
-)
-def test_real_servers() -> None:
-    raise AssertionError

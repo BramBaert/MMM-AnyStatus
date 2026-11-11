@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, tzinfo
+from decimal import Decimal
 from typing import Any
 
 from anystatus.timeutil import age_seconds, parse_timestamp
@@ -42,7 +43,7 @@ def to_number(value: Any) -> float:
     """A finite number from a JSON number or a numeric string. ValueError otherwise."""
     if isinstance(value, bool):
         raise ValueError("not a number")
-    if isinstance(value, int | float):
+    if isinstance(value, int | float | Decimal):  # Decimal: what MariaDB DECIMAL and PostgreSQL numeric give
         number = float(value)
     elif isinstance(value, str):
         try:

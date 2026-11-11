@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, tzinfo
 
 from anystatus.checks.base import Check, register
-from anystatus.checks.database import DatabaseTarget, fetch_first_row, parse_database_url
+from anystatus.checks.database import DatabaseTarget, fetch_first_row, target_from_table
 from anystatus.model import CheckFailure, Observation, Reading
 from anystatus.table import Table
 from anystatus.timeutil import age_seconds, format_duration, parse_timestamp
@@ -33,17 +33,10 @@ class SqlAge(Check):
 
     @classmethod
     def from_config(cls, table: Table) -> SqlAge:
-        url = table.req_str("database")
+        target = target_from_table(table)
         query = table.req_str("query")
         zone = table.timezone("timezone")
         empty = table.choice("empty", ("crit", "ok", "warn", "unknown"), "crit")
-        password = table.env("password")
-        target = DatabaseTarget("sqlite")
-        if url:
-            try:
-                target = parse_database_url(url, password, table.base_dir)
-            except ValueError as exc:
-                table.error(str(exc))
         return cls(target, query, zone, empty)
 
     def run(self, timeout: float) -> Observation | Reading:

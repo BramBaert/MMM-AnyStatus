@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from anystatus.model import CheckFailure
+from anystatus.table import Table
 
 _SCHEMES = {
     "sqlite": "sqlite",
@@ -98,6 +99,18 @@ def parse_database_url(url: str, password: str | None, base_dir: Path) -> Databa
     )
 
 
+def target_from_table(table: Table) -> DatabaseTarget:
+    """The `database` and `password_env` keys of a check, as a target (a config problem is recorded on the table)."""
+    url = table.req_str("database")
+    password = table.env("password")
+    if url:
+        try:
+            return parse_database_url(url, password, table.base_dir)
+        except ValueError as exc:
+            table.error(str(exc))
+    return DatabaseTarget("sqlite")
+
+
 def fetch_first_row(target: DatabaseTarget, query: str, timeout: float) -> tuple[Any, ...] | None:
     """Open a connection, run the query, return its first row (None when there is none), close again."""
     seconds = max(1, int(timeout))
@@ -114,39 +127,79 @@ def fetch_first_row(target: DatabaseTarget, query: str, timeout: float) -> tuple
             conn.close()
         return None if row is None else tuple(row)
     driver = load_driver(target.kind)
-    if target.kind == "mysql":
-        mconn = driver.connect(
-            host=target.host,
-            port=target.port or 3306,
-            user=target.user,
-            password=target.password or "",
-            database=target.name,
-            connect_timeout=seconds,
-            read_timeout=seconds,
-            write_timeout=seconds,
-        )
-        try:
-            with mconn.cursor() as cur:
-                cur.execute("SET SESSION TRANSACTION READ ONLY")
-                cur.execute(query)
-                row = cur.fetchone()
-        finally:
-            mconn.close()
-        return None if row is None else tuple(row)
-    pconn = driver.connect(
+    try:
+        if target.kind == "mysql":
+            return _fetch_mysql(driver, target, query, seconds)
+        return _fetch_postgres(driver, target, query, seconds)
+    except Exception as exc:
+        if _is_timeout(target.kind, exc):
+            raise CheckFailure(
+                f"query timed out after {seconds} s", detail=f"{type(exc).__name__}: {exc}"
+            ) from exc
+        raise
+
+
+# What the servers and drivers say when a query takes too long: MariaDB's max_statement_time (1969), MySQL's
+# max_execution_time (3024) and PyMySQL's own read timeout (2013, "lost connection"); PostgreSQL's QueryCanceled.
+_MYSQL_TIMEOUT_CODES = (1969, 3024, 2013)
+
+
+def _is_timeout(kind: str, exc: Exception) -> bool:
+    if kind == "mysql":
+        return bool(exc.args) and exc.args[0] in _MYSQL_TIMEOUT_CODES
+    return type(exc).__name__ == "QueryCanceled"
+
+
+def _fetch_mysql(
+    driver: ModuleType, target: DatabaseTarget, query: str, seconds: int
+) -> tuple[Any, ...] | None:
+    conn = driver.connect(
+        host=target.host,
+        port=target.port or 3306,
+        user=target.user,
+        password=target.password or "",
+        database=target.name,
+        connect_timeout=seconds,
+        read_timeout=seconds + 1,  # the server's own limit (below) should speak first
+        write_timeout=seconds,
+    )
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET SESSION TRANSACTION READ ONLY")
+            # Stop the query on the server too, not just stop waiting for it: MariaDB (seconds), MySQL (ms).
+            for statement in (
+                f"SET SESSION max_statement_time = {seconds}",
+                f"SET SESSION max_execution_time = {seconds * 1000}",
+            ):
+                try:
+                    cur.execute(statement)
+                    break
+                except driver.MySQLError:
+                    continue
+            cur.execute(query)
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    return None if row is None else tuple(row)
+
+
+def _fetch_postgres(
+    driver: ModuleType, target: DatabaseTarget, query: str, seconds: int
+) -> tuple[Any, ...] | None:
+    conn = driver.connect(
         host=target.host,
         port=target.port or 5432,
         user=target.user,
         password=target.password,
         dbname=target.name,
         connect_timeout=seconds,
-        options="-c default_transaction_read_only=on",
+        options=f"-c default_transaction_read_only=on -c statement_timeout={seconds * 1000}",
         autocommit=True,
     )
     try:
-        with pconn.cursor() as cur:
+        with conn.cursor() as cur:
             cur.execute(query)
             row = cur.fetchone()
     finally:
-        pconn.close()
+        conn.close()
     return None if row is None else tuple(row)
