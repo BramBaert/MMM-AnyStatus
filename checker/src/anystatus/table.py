@@ -92,6 +92,25 @@ class Table:
             return default
         return value
 
+    def boolean(self, key: str, default: bool) -> bool:
+        value = self._take(key)
+        if value is _MISSING:
+            return default
+        if not isinstance(value, bool):
+            self.error(f"'{key}' must be true or false")
+            return default
+        return value
+
+    def str_map(self, key: str) -> dict[str, str] | None:
+        """A table of string -> string, None when the key is not there."""
+        value = self._take(key)
+        if value is _MISSING:
+            return None
+        if not isinstance(value, dict) or not all(isinstance(v, str) for v in value.values()):
+            self.error(f"'{key}' must be a table of text values, such as {{ Online = \"ok\" }}")
+            return None
+        return dict(value)
+
     def duration(self, key: str, default: float | None = None) -> float | None:
         """A duration greater than zero."""
         value = self._take(key)
