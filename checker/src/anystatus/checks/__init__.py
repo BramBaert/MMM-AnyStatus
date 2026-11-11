@@ -2,6 +2,7 @@
 
 from anystatus.checks import (  # noqa: F401  (registration)
     disk,
+    docker_status,
     exec_cmd,
     file_age,
     http,
