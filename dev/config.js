@@ -32,8 +32,8 @@ const config = {
 		{
 			module: "MMM-AnyStatus",
 			position: "top_left", // under the healthy-checker rotation: bottom_* overlaps top_* on short screens
-			header: "Real checker (example config)",
-			config: { checkerUrl: "http://checker:8099", fetchInterval: 5 * 1000, maxItems: 6 },
+			header: "Real checker (examples + mqtt)",
+			config: { checkerUrl: "http://checker:8099", fetchInterval: 5 * 1000, maxItems: 8 },
 		},
 	],
 };

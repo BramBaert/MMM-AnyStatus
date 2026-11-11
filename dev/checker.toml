@@ -1,0 +1,91 @@
+# The dev page's "Real checker": the example checks plus three mqtt checks against the compose `mosquitto` service.
+# compose.dev.yaml copies this next to the other examples as /tmp/ex/config.toml (demo.sqlite, my_checks.py).
+
+[checker]
+name = "dev-checker"
+listen = "127.0.0.1:8099"
+state = "dev-state.sqlite"
+
+[defaults]
+interval = "30s"
+confirm = 2
+
+[mqtt.dev]
+host = "mosquitto"
+
+[[check]]
+id = "ping.localhost"
+type = "ping"
+label = "This machine"
+group = "network"
+host = "localhost"
+count = 2
+warn = 50
+crit = 200
+
+[[check]]
+id = "demo.heartbeat"
+type = "sql_age"
+label = "Demo heartbeat"
+group = "demo"
+database = "sqlite:demo.sqlite"
+query = "SELECT max(written_at) FROM heartbeat"
+warn = "1m"
+crit = "5m"
+summary = "last heartbeat {age} ago"
+
+[[check]]
+id = "demo.nightly"
+type = "sql_age"
+label = "Nightly job (stale on purpose)"
+group = "demo"
+confirm = 1
+database = "sqlite:demo.sqlite"
+query = "SELECT max(finished_at) FROM nightly_runs WHERE ok = 1"
+timezone = "UTC"
+warn = "26h"
+crit = "50h"
+
+[[check]]
+id = "custom.disk"
+type = "python"
+label = "Disk used"
+group = "demo"
+function = "my_checks:disk_used_percent"
+path = "."
+warn = 85
+crit = 95
+summary = "{value} % used"
+
+# mqtt: a heartbeat every 10 s, a retained Last Will, and a topic nobody publishes to.
+[[check]]
+id = "mqtt.heartbeat"
+type = "mqtt"
+label = "MQTT heartbeat"
+group = "mqtt"
+broker = "dev"
+topic = "demo/heartbeat"
+interval = "10s"
+warn = "30s"
+crit = "1m"
+
+[[check]]
+id = "mqtt.plug"
+type = "mqtt"
+label = "MQTT plug (retained)"
+group = "mqtt"
+broker = "dev"
+topic = "demo/plug/LWT"
+interval = "10s"
+levels = { Online = "ok", Offline = "crit" }
+
+[[check]]
+id = "mqtt.silent"
+type = "mqtt"
+label = "MQTT silent topic"
+group = "mqtt"
+broker = "dev"
+topic = "demo/never"
+interval = "10s"
+warn = "20s"
+crit = "40s"

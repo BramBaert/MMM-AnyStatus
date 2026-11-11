@@ -19,12 +19,33 @@ services:
     volumes:
       - ./examples/hand-written:/demo:ro
 
-  # The real checker, running checker/examples/config.toml (ping localhost, two sql_age checks on a SQLite file that
-  # update_demo_db.py keeps fresh, and a custom Python function). It listens on 0.0.0.0 inside the compose network only
-  # (no ports published); the examples are copied to /tmp so the checker's repo mount can stay read-only.
+  # A broker for the mqtt checks (anonymous, no persistence) and a tiny publisher: a heartbeat on demo/heartbeat every
+  # 10 s and a retained "Online" on demo/plug/LWT. Nobody publishes demo/never: that card turns amber, then red.
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    volumes:
+      - ./checker/tests/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  mqtt-publisher:
+    image: eclipse-mosquitto:2.0.22
+    depends_on: [mosquitto]
+    restart: on-failure
+    entrypoint:
+      - sh
+      - -c
+      - |
+        sleep 2
+        mosquitto_pub -h mosquitto -t demo/plug/LWT -r -m Online
+        while true; do mosquitto_pub -h mosquitto -t demo/heartbeat -m tick; sleep 10; done
+
+  # The real checker, running dev/checker.toml: the example checks (ping localhost, two sql_age checks on a SQLite file
+  # that update_demo_db.py keeps fresh, a custom Python function) plus three mqtt checks against `mosquitto`. It listens
+  # on 0.0.0.0 inside the compose network only (no ports published); the examples are copied to /tmp so the checker's
+  # repo mount can stay read-only.
   #   docker compose -f compose.dev.yaml up -d checker
   checker:
     image: ghcr.io/astral-sh/uv:0.13.7-python3.14-alpine
+    depends_on: [mosquitto, mqtt-publisher]
     working_dir: /tmp
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/venv
@@ -32,15 +53,17 @@ services:
       UV_LINK_MODE: copy
     volumes:
       - ./checker:/checker:ro
+      - ./dev/checker.toml:/dev-checker.toml:ro
     command:
       - sh
       - -c
       - |
         cp -r /checker/examples /tmp/ex
+        cp /dev-checker.toml /tmp/ex/config.toml
         sed -i 's/127.0.0.1:8099/0.0.0.0:8099/' /tmp/ex/config.toml
         python /tmp/ex/update_demo_db.py --loop > /dev/null &
         sleep 1
-        exec uv run --frozen --no-dev --project /checker anystatus-checker run /tmp/ex/config.toml
+        exec uv run --frozen --no-dev --extra mqtt --project /checker anystatus-checker run /tmp/ex/config.toml
   # Real MagicMirror, server only. Open http://localhost:8080
   #   docker compose -f compose.dev.yaml up magicmirror
   magicmirror:
