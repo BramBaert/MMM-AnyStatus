@@ -1,6 +1,6 @@
 # MMM-AnyStatus
 
-A calm status display for [MagicMirror²](https://magicmirror.builders/): a big **All OK** when everything is fine,
+A calm status display for [MagicMirrorÂ²](https://magicmirror.builders/): a big **All OK** when everything is fine,
 otherwise only what needs attention, with the reason and how long it has been like that.
 
 - **Red** (`crit`): broken now. **Amber** (`warn`): can wait until the weekend. **Grey** (`unknown`): no recent
@@ -49,7 +49,7 @@ display shows all four levels (plus one deliberately stale result, which shows g
 that: `ts` is when a check *ran*. Without `--demo` the file is served as it is, and goes grey once its `ttl` has
 run out. With --demo the server also has one URL per display state, e.g.
 http://localhost:8099/scenario/many as checkerUrl (all-ok, mixed, many, stale, invalid, empty, unsupported,
-unreachable, rotate).
+unreachable, rotate; and `/rotate/<name>,<name>,.../results` to rotate through a list every 20 s).
 
 To see it in a real MagicMirror without installing anything but Docker, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -59,7 +59,7 @@ To see it in a real MagicMirror without installing anything but Docker, see [CON
 |---|---|---|
 | `checkerUrl` | none, **required** | Base URL of the checker (or any producer of [SPEC.md](SPEC.md)). The module fetches `<checkerUrl>/results`. |
 | `fetchInterval` | `60000` | Milliseconds between fetches (at least 5000). |
-| `maxItems` | `6` | Show at most this many cards. With more non-green items, the display collapses to one count per `group`. |
+| `maxItems` | `6` | Show at most this many cards. With more non-green items, the display collapses to one row per `group`, listing up to 4 of its names (coloured by level) and "+N more". |
 
 You can use the module more than once, each with its own `checkerUrl`.
 

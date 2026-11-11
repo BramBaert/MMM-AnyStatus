@@ -16,6 +16,8 @@ run out: that is the age rule working. Without --demo this server does exactly t
   `x-demo-since` (seconds since the level last changed), which become `ts` and `since` on every request (SPEC.md
   reserves `x-` fields for a producer's own use; consumers ignore them). Scenarios: all-ok, mixed, many, stale,
   invalid, empty, unsupported, unreachable (HTTP 503), and rotate (a new one of those every 20 seconds).
+- /rotate/<name>,<name>,.../results: rotates through the scenarios you list, switching every 20 seconds, e.g.
+  /rotate/all-ok,mixed,stale/results.
 """
 
 import argparse
@@ -60,10 +62,15 @@ def materialize(document: dict, now: datetime) -> dict:
     return document
 
 
+def rotating(names: tuple[str, ...] | list[str]) -> str:
+    """The current one of `names`; it changes every ROTATE_SECONDS (all rotations of the same length change together)."""
+    return names[int(datetime.now(timezone.utc).timestamp() // ROTATE_SECONDS) % len(names)]
+
+
 def scenario_answer(name: str) -> tuple[int, bytes]:
     """The status and body for a scenario name; "rotate" picks the current one of ROTATION."""
     if name == "rotate":
-        name = ROTATION[int(datetime.now(timezone.utc).timestamp() // ROTATE_SECONDS) % len(ROTATION)]
+        name = rotating(ROTATION)
     if name == "unreachable":
         return 503, b"service unavailable (demo scenario)\n"
     path = SCENARIO_DIR / f"{name}.json"
@@ -84,6 +91,10 @@ def make_handler(path: Path, demo: bool) -> type[BaseHTTPRequestHandler]:
             elif demo and self.path.startswith("/scenario/") and self.path.split("?")[0].endswith("/results"):
                 name = self.path.split("?")[0][len("/scenario/") : -len("/results")]
                 status, body = scenario_answer(name)
+                self.reply(status, "application/json" if status == 200 else "text/plain; charset=utf-8", body)
+            elif demo and self.path.startswith("/rotate/") and self.path.split("?")[0].endswith("/results"):
+                names = [n for n in self.path.split("?")[0][len("/rotate/") : -len("/results")].split(",") if n]
+                status, body = scenario_answer(rotating(names)) if names else (404, b"no scenarios\n")
                 self.reply(status, "application/json" if status == 200 else "text/plain; charset=utf-8", body)
             elif self.path == "/":
                 self.reply(200, "text/plain; charset=utf-8", b"Hand-written results server. See /results.\n")

@@ -19,11 +19,9 @@ that the example in `SPEC.md`, `schema/results-1.schema.json` and the demo resul
 docker compose -f compose.dev.yaml up magicmirror
 ```
 
-Then open <http://localhost:8080>: one page with an instance of the module per display state, each with a header naming its
-scenario (all OK, mixed, many/collapsed groups, stale and clock mismatch, invalid results, empty, unsupported spec,
-unreachable, and one that rotates through all of them every 20 s). The scenarios are the files in
+Then open <http://localhost:8080>: three instances, one per column. Left rotates (every 20 s) through a healthy checker's states (all OK, mixed, stale and clock mismatch), the middle one shows many problems collapsed into groups, and the right one rotates through a broken checker's states (invalid results, empty, unsupported spec, unreachable). The demo server rotates through any list of scenarios: `/rotate/<name>,<name>,.../results`. The scenarios are the files in
 examples/hand-written/scenarios/ (times are relative to now: x-demo-age and x-demo-since, in seconds, which
-serve.py --demo turns into 	s and since); the page is dev/config.js. This starts the demo results server (`examples/hand-written/serve.py --demo`) and
+serve.py --demo turns into ts and since); the page is dev/config.js. This starts the demo results server (`examples/hand-written/serve.py --demo`) and
 MagicMirror (server only, image pinned in `compose.dev.yaml`) with this folder mounted as
 `modules/MMM-AnyStatus` and `dev/config.js` as its config. Edit the module, reload the browser; a change to
 `node_helper.js` needs `docker compose -f compose.dev.yaml restart magicmirror`.

@@ -1,4 +1,4 @@
-// MagicMirror config for development: server only, one module instance per display state, fed by the demo server.
+// MagicMirror config for development: server only, three module instances, two of them rotating through display states, fed by the demo server.
 // The scenarios are in examples/hand-written/scenarios/; the demo server serves them at /scenario/<name>/results.
 const config = {
 	address: "0.0.0.0",
@@ -8,67 +8,29 @@ const config = {
 	timeFormat: 24,
 	units: "metric",
 
-	// Only top_* regions: MagicMirror's top regions grow downward and its bottom regions upward, and nothing stops them
-	// meeting, so on a screen shorter than both together the bottom instances were drawn over the top ones. Within one
-	// region the instances stack in normal flow and never overlap; a column that is too long runs off the screen.
+	// Three instances, one per column, so that every column stays short (stacked instances overlapped on short screens).
+	// Two of them rotate through scenarios (the demo server's /rotate/<name>,<name>,.../results, a new one every 20 s).
 	modules: [
 		{
 			module: "MMM-AnyStatus",
 			position: "top_left",
-			header: "all OK",
-			config: { checkerUrl: "http://demo:8099/scenario/all-ok", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
-			position: "top_left",
-			header: "empty (no checks)",
-			config: { checkerUrl: "http://demo:8099/scenario/empty", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
-			position: "top_left",
-			header: "unsupported spec",
-			config: { checkerUrl: "http://demo:8099/scenario/unsupported", fetchInterval: 5 * 1000, maxItems: 6 },
+			header: "Healthy checker (rotating): all OK, mixed, stale",
+			config: { checkerUrl: "http://demo:8099/rotate/all-ok,mixed,stale", fetchInterval: 5 * 1000, maxItems: 6 },
 		},
 		{
 			module: "MMM-AnyStatus",
 			position: "top_center",
-			header: "mixed",
-			config: { checkerUrl: "http://demo:8099/scenario/mixed", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
-			position: "top_right",
-			header: "many (groups)",
+			header: "many problems: collapsed into groups",
 			config: { checkerUrl: "http://demo:8099/scenario/many", fetchInterval: 5 * 1000, maxItems: 6 },
 		},
 		{
 			module: "MMM-AnyStatus",
-			position: "top_left",
-			header: "stale and clock mismatch",
-			config: { checkerUrl: "http://demo:8099/scenario/stale", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
-			position: "top_center",
-			header: "invalid results",
-			config: { checkerUrl: "http://demo:8099/scenario/invalid", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
 			position: "top_right",
-			header: "rotate: a new scenario every 20 s",
-			config: { checkerUrl: "http://demo:8099/scenario/rotate", fetchInterval: 5 * 1000, maxItems: 6 },
-		},
-		{
-			module: "MMM-AnyStatus",
-			position: "top_left",
-			header: "unreachable (HTTP 503)",
-			config: { checkerUrl: "http://demo:8099/scenario/unreachable", fetchInterval: 5 * 1000, maxItems: 6 },
+			header: "Broken checker (rotating): how the module copes",
+			config: { checkerUrl: "http://demo:8099/rotate/invalid,empty,unsupported,unreachable", fetchInterval: 5 * 1000, maxItems: 6 },
 		},
 	],
 };
-
 /*************** DO NOT EDIT THE LINE BELOW ***************/
 if (typeof module !== "undefined") {
 	module.exports = config;

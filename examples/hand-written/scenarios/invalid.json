@@ -5,8 +5,8 @@
     { "id": "good.one", "label": "A good result", "level": "ok", "ttl": 180, "x-demo-age": 20 },
     { "id": "no.ttl", "label": "Missing ttl", "level": "ok", "x-demo-age": 20 },
     { "id": "bad.time", "label": "Time without offset", "level": "ok", "ttl": 180, "ts": "2026-11-11T14:03:00" },
-    { "id": "dup", "label": "Duplicate, first", "level": "ok", "ttl": 180, "x-demo-age": 20 },
-    { "id": "dup", "label": "Duplicate, second", "level": "warn", "summary": "same id again", "ttl": 180, "x-demo-age": 20 },
+    { "id": "dup", "label": "Duplicate id", "level": "ok", "ttl": 180, "x-demo-age": 20 },
+    { "id": "dup", "label": "Duplicate id", "level": "warn", "summary": "same id again", "ttl": 180, "x-demo-age": 20 },
     { "id": "odd.level", "label": "Unknown level", "level": "panic", "ttl": 180, "x-demo-age": 20 }
   ]
 }
