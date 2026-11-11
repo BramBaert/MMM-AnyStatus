@@ -223,3 +223,6 @@ __marimo__/
 node_modules/
 npm-debug.log*
 .npm/
+
+# The module's own lib/ (the Python rule above would hide it)
+!/lib/
