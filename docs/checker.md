@@ -147,12 +147,361 @@ and debounce take a clock and run without sleeping, so the rules above (confirm 
 a streak, restart continuity within/past `ttl`, a hanging thread not restarted) each have a test that runs in
 milliseconds. CI runs on Python 3.11 and 3.14.
 
-## First check types (step 3)
+## Check types
 
-- `ping`: runs the system `ping` command (no raw sockets, so no root needed); value: round-trip time in ms.
-  Unreachable is `crit`, not a failure: "the host doesn't answer" *is* the answer.
-- `sql_age`: the age of a timestamp a query returns; SQLite in the core, other databases through the extras. An
-  empty answer (`NULL`) is `crit` ("no rows"), unless `empty = "ok"`.
-- `python`: a custom function, `function = "my_checks:backup_ok"` with an optional `path` to import from. It gets
-  the check's config table and returns a number (compared with the limits), or `anystatus.Observation(level=...,
-  summary=..., value=..., unit=...)`. An exception is a failure. Sync or async functions both work.
+### Keys every check has
+
+| Key | Default | |
+|---|---|---|
+| `id`, `type` | required | |
+| `label`, `group` | `id`, none | as in SPEC |
+| `interval` | `[defaults]` | how often it runs |
+| `timeout` | 10 s | per run, at most `interval`; some types need more (`image_vulns`) |
+| `ttl` | 3 × `interval` | |
+| `confirm` | `[defaults]`, else 2 | see [Debounce](#debounce-confirm) |
+| `warn`, `crit`, `worse` | per type | see [Limits](#limits); some types have default limits |
+| `summary` | per type | a template replacing the type's own text: `"last backup {age} ago"`. Placeholders: `{value}`, `{unit}`, `{age}` (a duration, written as "3.1 d") and the type's own (listed per type) |
+
+**Durations as values** (ages, `sql_age`, `file_age`) are compared in seconds but reported in the largest unit that
+fits, one decimal: `3.1` `d`, `5.0` `h`, `12.0` `min`. Limits on them are written as durations: `warn = "26h"`.
+
+**Where things are reached:** hosts, URLs and paths are as the *checker* sees them. In a container, `localhost` is
+the container itself.
+
+### Overview
+
+| Type | Value | Worse | Default limits | Needs | Step |
+|---|---|---|---|---|---|
+| `ping` | round trip, ms | above | none; no answer is `crit` | the system `ping` | 3 |
+| `sql_age` | age of a timestamp | above | none | driver extra for MariaDB/MySQL/PostgreSQL | 3 |
+| `python` | your function's | your function's | none | | 3 |
+| `tcp` | connect time, ms | above | none; refused is `crit` | | 4 |
+| `http` | response time, or a value from the JSON | above | none; a wrong status is `crit` | | 4 |
+| `tls_expiry` | days until expiry | below | warn 21 d, crit 7 d | | 4 |
+| `sql_value` | a number from a query | above | none | as `sql_age` | 4 |
+| `file_age` | age of the newest matching file | above | none; no file is `crit` | | 4 |
+| `disk` | used % | above | warn 85, crit 95 | | 4 |
+| `exec` | from the plugin's output | | none; the exit code is the level | the command | 4 |
+| `docker_status` | containers not fine | above | crit 1 | Docker API access | 4 |
+| `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
+| `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
+| `result_file` *(proposed)* | as the file says | | | | 4 |
+| `systemd` *(proposed)* | | | | systemd on the host | later |
+| `dns` *(proposed)* | lookup time, ms | above | none; no answer is `crit` | | later |
+
+All types are standard library only, except the database drivers and the commands they run (`ping`, Trivy, your
+`exec` plugin).
+
+### `ping`
+
+```toml
+[[check]]
+id = "ping.router"
+type = "ping"
+label = "Router"
+group = "network"
+interval = "1m"
+host = "router.example"
+count = 3          # packets per run (default 3)
+warn = 50          # ms
+crit = 200
+```
+
+Runs the system `ping` command, so no raw sockets and no root; its output is parsed for Linux (iputils, BusyBox) and
+Windows. Value: average round trip. **No answer at all is `crit`** ("no answer"): that *is* the answer, not a
+failure of the check. Partial loss is mentioned in the summary ("2/3 answered, 4.1 ms"). In a container the image
+must allow unprivileged ping (`net.ipv4.ping_group_range`, or BusyBox ping with `CAP_NET_RAW`).
+
+### `tcp`
+
+```toml
+[[check]]
+id = "tcp.mariadb"
+type = "tcp"
+label = "MariaDB port"
+host = "db.example"
+port = 3306
+```
+
+Value: time to connect. Refused or no answer within the timeout is `crit` ("port 3306 refused"). It proves
+something listens, nothing more.
+
+### `http`
+
+```toml
+[[check]]
+id = "http.sync"
+type = "http"
+label = "Photo sync"
+url = "https://sync.example/api/status"
+username = "monitor"
+password_env = "SYNC_PASSWORD"          # or: bearer_env = "SYNC_TOKEN"
+expect_status = [200]                    # default: any 2xx
+json = "jobs.photos.last_success"        # optional: a value from the JSON answer
+value_is = "time"                        # "number" (default) or "time": the value is a timestamp, its age is compared
+warn = "2h"
+crit = "1d"
+```
+
+Without `json`, the value is the response time in ms and the check is mostly about the status code. **An unexpected
+status is `crit`** ("HTTP 503"), a connection that fails is `unknown`.
+
+- `json` is a dotted path, with list indices as numbers (`items.0.age`).
+- A missing path, or a value that isn't a number or a time, is a failure: the API changed, so the check can't tell.
+- `value_is = "time"` accepts RFC 3339 strings and Unix seconds. A time without an offset is read as UTC unless
+  `timezone = "Europe/Brussels"`.
+- TLS is verified; `verify_tls = false` is allowed but logged as a warning at startup.
+- Extra headers: a `headers` table; values ending in `_env` are read from the environment, like every other key.
+
+### `tls_expiry`
+
+```toml
+[[check]]
+id = "tls.website"
+type = "tls_expiry"
+label = "Website certificate"
+host = "www.example.org"     # port 443 unless `port`; `servername` if it differs from host
+interval = "12h"
+confirm = 1
+```
+
+Value: days until the certificate the server presents expires (negative when expired). Default limits: amber at 21
+days, red at 7. A Let's Encrypt certificate renews at 30 days left, so amber means renewal has failed for over a week.
+
+**A certificate that isn't valid for the host, or isn't trusted, is `crit`** ("not valid for www.example.org"),
+since browsers refuse it. Not reaching the server at all is `unknown`.
+
+### `sql_age` and `sql_value`
+
+```toml
+[[check]]
+id = "backup.nas"
+type = "sql_age"
+label = "NAS backup"
+group = "backups"
+interval = "15m"
+database = "postgresql://monitor@db.example/backups"
+password_env = "BACKUP_DB_PASSWORD"
+query = "SELECT max(finished_at) FROM runs WHERE ok"
+warn = "26h"
+crit = "50h"
+
+[[check]]
+id = "queue.mail"
+type = "sql_value"
+label = "Mail queue"
+database = "sqlite:///var/lib/mailer/queue.db"
+query = "SELECT count(*) FROM outgoing WHERE sent_at IS NULL"
+warn = 20
+crit = 200
+```
+
+`database` is a URL: `sqlite:///path`, `mysql://` / `mariadb://`, `postgresql://`. **A password in the URL is a config
+error**: use `password_env`. SQLite opens read-only (`mode=ro`). A MariaDB or PostgreSQL URL without its extra
+installed is a config error that names the extra to install.
+
+- The query must return one row with one column, the first row is used. More columns is a config-time error if
+  it can be detected, otherwise a failure.
+- `sql_age`: the column is a timestamp (a database time type, an RFC 3339 string or Unix seconds). A time without an
+  offset is UTC unless `timezone` says otherwise. **This is the classic trap:** MariaDB `DATETIME` and SQLite text
+  are usually local time, so the docs show `timezone` prominently.
+- **No row or `NULL` is `crit`** ("no rows"); `empty = "ok"`, `"warn"` or `"unknown"` changes that.
+- `sql_age` placeholders: `{newest}` (the timestamp itself, local time).
+- Connections are opened per run and closed again. A connection that fails is `unknown`.
+
+### `file_age`
+
+```toml
+[[check]]
+id = "backup.offsite"
+type = "file_age"
+label = "Offsite copy"
+group = "backups"
+path = "/mnt/offsite/backups/*.tar.zst"   # a glob: the newest match counts
+warn = "8d"
+crit = "15d"
+min_size = "1MB"                           # optional: smaller files don't count (a failed run leaves a stub)
+```
+
+Value: age of the newest matching file (modification time). **No matching file is `crit`** ("no file matches"). A
+mount that isn't there is the same thing seen from here. Placeholders: `{file}` (the newest file's name).
+
+### `disk`
+
+```toml
+[[check]]
+id = "disk.nas"
+type = "disk"
+label = "NAS disk"
+path = "/mnt/nas"
+```
+
+Value: used %, default limits 85 and 95. `measure = "free"` reports free space instead (in GB, worse below, no
+default limits). In a container, the path is a mounted volume, and the numbers are those of the filesystem behind
+it.
+
+### `exec`
+
+```toml
+[[check]]
+id = "smart.sda"
+type = "exec"
+label = "Disk sda health"
+command = ["/usr/lib/nagios/plugins/check_ide_smart", "-d", "/dev/sda"]
+interval = "1h"
+```
+
+Runs a command **without a shell** (a list, never a string), so no quoting or injection problems. Nagios plugin
+conventions:
+
+- Exit code 0, 1, 2 or 3 gives `ok`, `warn`, `crit` or `unknown`. Any other exit code is a failure.
+- The first line of the output, up to `|`, is the summary.
+- The first performance value after `|` (`time=0.12s;1;2`) is the value and unit. The plugin's own thresholds win:
+  `warn` and `crit` are not used.
+
+On a timeout the process is killed, which a thread can't be. Environment variables are passed only when listed:
+`env = ["PATH", "SMART_TOKEN"]`.
+
+### `docker_status`
+
+```toml
+[[check]]
+id = "docker.containers"
+type = "docker_status"
+label = "Containers"
+group = "docker"
+docker = "unix:///var/run/docker.sock"    # or "tcp://socket-proxy:2375"
+containers = ["db", "web", "backup"]      # by name; or `labels = ["status.watch=true"]`; default: all running ones
+restarts = 3                              # more restarts than this within `restart_window` (default 1h) is amber
+```
+
+Reads the Docker API (a few `GET`s, plain HTTP over the socket, no Docker SDK). Per container:
+
+- A listed container that is missing or not running is `crit`.
+- A container that is `unhealthy` is `crit`. One that is still `starting` counts as fine, and `confirm` absorbs the
+  start.
+- Restarting more often than `restarts` within the window is `warn`. A container that keeps restarting does serve
+  in between, but something is wrong with it.
+
+The value is the number of containers that aren't fine. The summary names them ("backup: unhealthy; web: 5 restarts
+in 1 h"), and the level is the worst of them. One check covers a set of containers, so ten containers don't make
+ten cards. Make separate checks if they should.
+
+**Read-only access** (the open question in design.md): the proposal is to document [docker-socket-proxy] with only
+`CONTAINERS=1` and `IMAGES=1`, which refuses every `POST`, and to recommend it over mounting the socket. Mounting
+`/var/run/docker.sock:ro` does *not* make the API read-only; the docs must say so plainly.
+
+[docker-socket-proxy]: https://github.com/Tecnativa/docker-socket-proxy
+
+### `docker_updates`
+
+```toml
+[[check]]
+id = "docker.updates"
+type = "docker_updates"
+label = "Image updates"
+group = "docker"
+interval = "1d"
+confirm = 1
+versions = "minor"            # newer tags within the same major (default); "major" includes major bumps; "none"
+ignore = ["postgres"]         # images to skip
+```
+
+Per image of a running container:
+
+- **Rebuilt upstream:** the tag's registry digest differs from the running image's (`HEAD` on the manifest, which
+  Docker Hub doesn't count as a pull).
+- **Newer version:** the registry has a higher version tag of the same form (`1.27.3-alpine` → `1.27.4-alpine`,
+  not → `1.28.0`). Only tags that read as versions count; `latest` is covered by the digest.
+
+The value is the number of images with an update. It is **`warn` at most, never `crit`**: an update is "do it this
+weekend". `image_vulns` is what turns red when an update fixes something serious. The summary names the images, for
+example "3 images: nginx (rebuilt), grafana 11.2 → 11.3, …". Private registries take credentials from the
+environment (`registry_auth_env`). A registry that doesn't answer makes that image unknown, not the whole check:
+the summary mentions it, and the level is `unknown` only if no registry answered.
+
+### `image_vulns`
+
+```toml
+[[check]]
+id = "docker.vulns"
+type = "image_vulns"
+label = "Vulnerabilities"
+group = "docker"
+interval = "1d"
+timeout = "15m"             # the first run downloads Trivy's database
+confirm = 1
+trivy = "trivy"             # the command, or a path
+```
+
+Runs `trivy image --format json --ignore-unfixed` for each running container's image and counts **only CVEs that
+have a fix**. A base image always carries "will not fix" CVEs, so counting those would make the check amber forever.
+
+- A fixable `CRITICAL` CVE makes it `crit`, a fixable `HIGH` one `warn` (`severities` changes which count).
+- The value is the number of fixable CVEs. The summary names the worst image ("grafana: 2 critical, fixed in
+  11.3.1").
+- Trivy not being installed is a config error at startup.
+- Trivy's cache (`--cache-dir`) should be on a volume, so the database isn't downloaded every day.
+
+### `python`
+
+```toml
+[[check]]
+id = "solar.today"
+type = "python"
+label = "Solar yield"
+function = "my_checks:solar_today"    # module:function
+path = "/etc/anystatus/checks"        # optional: where to import from
+site = "roof"                         # any other key is passed to the function
+warn = 2
+crit = 0.5
+worse = "below"
+```
+
+The function gets the check's config table (a `dict`) and returns either a number, which is compared with the
+limits, or `anystatus.Observation(level=..., summary=..., value=..., unit=...)` when it decides the level itself.
+It may also be `async`. An exception is a failure; its type, not its message, goes into the summary (message text can
+contain secrets). It runs in a worker thread with the usual [timeout rules](#scheduling).
+
+### `result_file` (proposed)
+
+```toml
+[[check]]
+id = "jobs.nightly"
+type = "result_file"
+path = "/var/lib/nightly/status.json"
+```
+
+Reads a file that another program writes in the [SPEC.md](../SPEC.md) format: a single result, or a document whose
+results are all taken over. **Any language can report this way, without a push endpoint**, and it is the "write a
+result by hand" example from design.md.
+
+The file's `ts` and `ttl` are passed on unchanged, so a job that stops writing still turns grey on time, and the
+checker doesn't make it look fresh. The file's level isn't debounced, because the job decided it. A missing or
+unreadable file is `unknown`. Ids in a document are prefixed with this check's id (`jobs.nightly/<id>`) so they can't
+clash.
+
+### `systemd` (proposed, later)
+
+```toml
+[[check]]
+id = "backup.timer"
+type = "systemd"
+unit = "restic-backup.service"
+max_age = "26h"      # optional: for a unit run by a timer, how long ago it last finished successfully
+```
+
+A failed unit is `crit`. With `max_age`, a unit that last succeeded longer ago than that is `crit` too. That is
+"check the result where it lives" for the many backups that run as systemd timers. Needs `systemctl` on the host,
+so not from a container without extra setup.
+
+### `dns` (proposed, later)
+
+Resolves a name and optionally compares the answer (`expect = ["192.0.2.10"]`); the value is the lookup time. The
+standard library can only ask the system's resolver, so asking a *specific* server (is the Pi-hole answering?) needs
+an extra (`dnspython`).
+
+### Not planned as types
+
+Load, memory, temperatures, SMART: good Nagios plugins already exist, so `exec` covers them. MQTT stays out
+(design.md).
