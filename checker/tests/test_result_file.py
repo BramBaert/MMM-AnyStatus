@@ -136,10 +136,9 @@ def test_a_document_is_served_under_prefixed_ids(tmp_path: Path) -> None:
     )
     assert [r["id"] for r in results] == ["jobs/db", "jobs/files"]
     assert (results[0]["label"], results[0]["group"]) == ("Database dump", "backups")
-    assert (results[1]["label"], results[1]["group"]) == (
-        "Jobs",
-        "jobs",
-    )  # the check's, when the file has none
+    # without a label of its own: named by its own id (not the check's label, which all would share); the group is
+    # the check's
+    assert (results[1]["label"], results[1]["group"]) == ("files", "jobs")
     assert results[1]["level"] == "crit"
 
 
@@ -338,16 +337,34 @@ def test_failures_take_the_normal_judge_and_debounce_path(tmp_path: Path) -> Non
     outcome = execute(spec)
     assert outcome == Failure("file not found", outcome.detail if isinstance(outcome, Failure) else None)
     assert judge(spec, outcome).level == "unknown"
-    # a reading file followed by a gone one: the failure is served (the passthrough no longer is) ...
+    # a good read followed by a gone file: debounced like any failure (confirm = 2), so the first miss keeps the
+    # file's last result as it was (its own ts: it still ages out honestly) ...
     w = world(tmp_path)
     write(tmp_path, res(level="ok"))
-    assert run_once(w)[0]["level"] == "ok"
+    first = run_once(w)[0]
+    assert first["level"] == "ok"
     (tmp_path / "r.json").unlink()
-    r = run_once(w)[0]
-    assert (r["level"], r["summary"], r["ts"]) == ("unknown", "file not found", "2026-11-11T12:01:00Z")
+    assert run_once(w)[0] == first
+    # ... the second miss shows; a single result shares the check's id, so the failure takes its place ...
+    results = run_once(w)
+    assert [(r["id"], r["level"], r["summary"]) for r in results] == [("jobs", "unknown", "file not found")]
     # ... and when it is back, so are its own results
     write(tmp_path, res(level="warn", ts="2026-11-11T12:01:30Z"))
     assert run_once(w)[0]["level"] == "warn"
+
+
+def test_a_confirmed_failure_shows_next_to_a_documents_last_results(tmp_path: Path) -> None:
+    """A document's results have their own ids and ts: after a confirmed failure they stay (and age out by their own
+    ttl) next to the failure, so a red result can't vanish behind one grey "file not found"."""
+    w = world(tmp_path)
+    write(tmp_path, doc(res(id="db", level="crit", summary="dump failed")))
+    kept = run_once(w)
+    assert [r["id"] for r in kept] == ["jobs/db"]
+    (tmp_path / "r.json").unlink()
+    assert run_once(w) == kept  # not confirmed yet
+    results = run_once(w)
+    assert [(r["id"], r["level"]) for r in results] == [("jobs", "unknown"), ("jobs/db", "crit")]
+    assert results[1] == kept[0]  # unchanged, own ts
 
 
 def test_the_partial_write_is_read_again_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

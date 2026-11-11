@@ -53,7 +53,9 @@ def _text(raw: dict[str, Any], key: str, *, allow_empty: bool) -> str | None:
     return value
 
 
-def _valid_result(raw: dict[str, Any], spec: CheckSpec, result_id: str) -> dict[str, Any] | str:
+def _valid_result(
+    raw: dict[str, Any], spec: CheckSpec, result_id: str, default_label: str
+) -> dict[str, Any] | str:
     """The result as it will be served, or the reason it is invalid."""
     ts = _time(raw.get("ts"))
     if "ts" not in raw:
@@ -85,7 +87,7 @@ def _valid_result(raw: dict[str, Any], spec: CheckSpec, result_id: str) -> dict[
     if "since" in raw and since is None:
         return "bad since (needs RFC 3339 with an offset)"
 
-    result: dict[str, Any] = {"id": result_id, "label": label or spec.label}
+    result: dict[str, Any] = {"id": result_id, "label": label or default_label}
     group_text = group or spec.group
     if group_text:
         result["group"] = group_text
@@ -150,7 +152,10 @@ def render_passthrough(spec: CheckSpec, outcome: Passthrough, read_at: datetime)
     for result_id, members in groups.items():
         raw, reason = members[0]
         label = raw.get("label") if isinstance(raw, dict) else None
-        label = label if isinstance(label, str) and label else None
+        # Without a label of its own, a document's result is named by its own id (not the check's label, which all
+        # of them would then share); a single result by the check's label.
+        own_name = result_id[len(spec.id) + 1 :] if outcome.prefixed and result_id else None
+        label = label if isinstance(label, str) and label else own_name
         if result_id is None:
             text = reason or "bad id"
             if len(members) > 1:
@@ -159,7 +164,7 @@ def render_passthrough(spec: CheckSpec, outcome: Passthrough, read_at: datetime)
         elif len(members) > 1:
             served.append(_invalid(spec, result_id, "id used more than once", stamp))
         else:
-            checked = _valid_result(raw, spec, result_id)
+            checked = _valid_result(raw, spec, result_id, label or spec.label)
             if isinstance(checked, str):
                 served.append(_invalid(spec, result_id, checked, stamp, label))
             else:

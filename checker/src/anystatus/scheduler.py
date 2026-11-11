@@ -149,9 +149,13 @@ class Slot:
     started: float = 0.0
     zombie: Handle | None = None  # a timed-out run whose thread is still alive
     runs: int = 0
-    # The results of a check that serves several (or someone else's) results as they are (Passthrough). While this
-    # is set, it is served instead of `served`; a later failure of the check clears it again.
+    # The results of a check that serves several (or someone else's) results as they are (Passthrough). They carry
+    # their own ts, so keeping them after a failure is honest: they age out by themselves.
     passthrough: list[dict[str, Any]] | None = None
+    passthrough_prefixed: bool = (
+        False  # a document's results (own ids) rather than one result under the check's id
+    )
+    passthrough_failures: int = 0  # failures in a row since the last good read
 
 
 class Scheduler:
@@ -253,10 +257,10 @@ class Scheduler:
         """Every result to serve, in config order; a passthrough check contributes all of its results."""
         out: list[dict[str, Any]] = []
         for slot in self.slots:
+            if slot.served is not None:
+                out.append(render_result(slot.spec, slot.served))
             if slot.passthrough is not None:
                 out.extend(slot.passthrough)
-            elif slot.served is not None:
-                out.append(render_result(slot.spec, slot.served))
         return out
 
     def run_forever(self, stop: threading.Event, wake: threading.Event) -> None:
@@ -284,11 +288,27 @@ class Scheduler:
             # Served as the file says: no judge, no debounce, no new ts, and nothing for the memory file (a restart
             # simply reads the file again). The debounce state is dropped so that a later failure starts fresh.
             slot.passthrough = render_passthrough(spec, outcome, ts)
+            slot.passthrough_prefixed = outcome.prefixed
+            slot.passthrough_failures = 0
             slot.state = slot.served = None
             slot.runs += 1
             log.debug("%s: run finished: %d result(s) from the file", spec.id, len(slot.passthrough))
             return
-        slot.passthrough = None
+        if slot.passthrough is not None and isinstance(outcome, Failure):
+            # A failed read (a file being rewritten, a mount that blinks) is debounced like any failure: until it is
+            # confirmed, the last results stay served as they were. Once confirmed it shows; a document's results
+            # stay next to it and age out by their own ttl, a single result (same id as the check) is replaced.
+            slot.passthrough_failures += 1
+            if slot.passthrough_failures < spec.confirm:
+                slot.runs += 1
+                log.info("%s: failed, not shown yet: %s", spec.id, mask(outcome.summary, spec.secrets))
+                return
+            if slot.passthrough_prefixed:
+                slot.passthrough = [r for r in slot.passthrough if r["id"] != spec.id]
+            else:
+                slot.passthrough = None
+        elif not isinstance(outcome, Failure):
+            slot.passthrough = None
         previous = slot.served.core.level if slot.served else None
         core = judge(spec, outcome)
         reported = step(slot.state, core, ts, spec.confirm)

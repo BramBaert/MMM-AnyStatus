@@ -363,10 +363,11 @@ conventions:
 - Exit code 0, 1, 2 or 3 gives `ok`, `warn`, `crit` or `unknown`. Any other exit code is a failure.
 - The first line of the output, up to `|`, is the summary.
 - The first performance value after `|` (`time=0.12s;1;2`) is the value and unit. The plugin's own thresholds win:
-  `warn` and `crit` are not used.
+  `warn`, `crit` and `worse` are a config error here.
 
 On a timeout the process is killed, which a thread can't be. Environment variables are passed only when listed:
-`env = ["PATH", "SMART_TOKEN"]`.
+`env = ["PATH", "SMART_TOKEN"]`; nothing else, `PATH` included (on Windows most programs also need `SYSTEMROOT`).
+What the command writes to stderr goes to the debug log, masked, and never into a summary.
 
 ### `docker_status`
 
@@ -483,9 +484,18 @@ results are all taken over. **Any language can report this way, without a push e
 result by hand" example from design.md.
 
 The file's `ts` and `ttl` are passed on unchanged, so a job that stops writing still turns grey on time, and the
-checker doesn't make it look fresh. The file's level isn't debounced, because the job decided it. A missing or
-unreadable file is `unknown`. Ids in a document are prefixed with this check's id (`jobs.nightly/<id>`) so they can't
-clash.
+checker doesn't make it look fresh. The file's level isn't debounced, because the job decided it. Ids in a document
+are prefixed with this check's id (`jobs.nightly/<id>`) so they can't clash. A result without a `label` is named by
+its own id (in a document) or by the check's `label` (a single result). `warn`, `crit`, `worse` and `summary` are a
+config error here.
+
+**Reading the file can fail** (missing, unreadable, not JSON, over 1 MB, an unsupported spec): that is `unknown`
+under the check's own id, **debounced by `confirm`** like any failure, so a job that rewrites its file in place
+doesn't make the display blink. Until the failure is confirmed, the last results stay served as they were (they
+carry their own `ts`, so they still age out on time). Once it shows, a single result is replaced by it; a document's
+results stay next to it, so a red result can't vanish behind one grey "file not found". A result in the file that
+breaks SPEC.md is served as `unknown` ("invalid in file: no ttl") under its id. Better still, the job writes to a
+temporary file and renames it.
 
 ### `systemd` (proposed, later)
 
