@@ -1,5 +1,5 @@
-# The dev page's "Real checker": the example checks plus a system and a result_file check, and three mqtt checks against
-# the compose `mosquitto` service.
+# The dev page's "Real checker": the example checks plus a system and a result_file check, three mqtt checks against
+# the compose `mosquitto` service, and three Docker checks (containers, image updates, vulnerabilities).
 # compose.dev.yaml copies this next to the other examples as /tmp/ex/config.toml (demo.sqlite, my_checks.py).
 
 [checker]
@@ -109,7 +109,7 @@ interval = "10s"
 warn = "20s"
 crit = "40s"
 
-# docker_status and docker_updates through the compose `docker-socket-proxy` (GET on /containers and /images only).
+# docker_status, docker_updates and image_vulns through the compose `docker-socket-proxy` (GET on /containers and /images only).
 # docker_updates asks Docker Hub / ghcr.io about the dev stack's own public images, once a day.
 [[check]]
 id = "docker.containers"
@@ -127,3 +127,36 @@ docker = "tcp://docker-socket-proxy:2375"
 interval = "1d"
 timeout = "60s"
 show_after = { unknown = "2d" }   # a registry that is down for a day doesn't turn the card grey
+
+# image_vulns on the dev stack's own images, with the schedule of checker/README.md's example (explained there).
+# Trivy comes from the compose `trivy-bin` service; it reads local images through the proxy (DOCKER_HOST). The full
+# list is at http://localhost:8099/vulns. The first run downloads Trivy's database (a few minutes).
+[[check]]
+id = "docker.vulns"
+type = "image_vulns"
+label = "Vulnerabilities"
+group = "docker"
+docker = "tcp://docker-socket-proxy:2375"
+interval = "1d"
+timeout = "15m"
+trivy = "/trivy/trivy"
+cache_dir = "/trivy-cache"
+env = ["HOME", "DOCKER_HOST"]
+show_after = { unknown = "3d" }
+
+[check.schedule.update]
+CRITICAL = { warn = "0d",  crit = "3d" }
+HIGH     = { warn = "7d",  crit = "30d" }
+MEDIUM   = { warn = "30d", crit = "never" }
+
+[check.schedule.rebuild]
+CRITICAL = { warn = "0d",  crit = "7d" }
+HIGH     = { warn = "14d", crit = "never" }
+MEDIUM   = { warn = "60d", crit = "never" }
+
+[check.schedule.waiting]
+CRITICAL = { warn = "0d",  crit = "never" }
+HIGH     = { warn = "0d",  crit = "never" }
+
+[check.schedule.no_fix]
+CRITICAL = { warn = "never", crit = "0d" }

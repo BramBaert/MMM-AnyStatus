@@ -38,9 +38,10 @@ services:
         mosquitto_pub -h mosquitto -t demo/plug/LWT -r -m Online
         while true; do mosquitto_pub -h mosquitto -t demo/heartbeat -m tick; sleep 10; done
 
-  # Read-only access to the Docker API for the docker_status and docker_updates checks: only GET on /containers and
-  # /images, everything else (and every POST) is refused. The checker reaches it at tcp://docker-socket-proxy:2375.
-  # Mounting the socket :ro here does not make the API read-only; the proxy does.
+  # Read-only access to the Docker API for the docker_status, docker_updates and image_vulns checks (and Trivy reading
+  # local images): only GET on /containers and /images, everything else (and every POST) is refused. The checker
+  # reaches it at tcp://docker-socket-proxy:2375. Mounting the socket :ro here does not make the API read-only; the
+  # proxy does.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     environment:
@@ -50,22 +51,48 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+  # Trivy for the image_vulns check: the checker's image has none, so this one-shot copies the binary of Trivy's own
+  # image into a volume the checker mounts (again on every `up`, so a new tag here is picked up). It then exits.
+  trivy-bin:
+    image: aquasec/trivy:0.76.2
+    entrypoint: ["cp", "/usr/local/bin/trivy", "/trivy/trivy"]
+    volumes:
+      - trivy_bin:/trivy
+
   # The real checker, running dev/checker.toml: the example checks (ping localhost, two sql_age checks on a SQLite file
-  # that update_demo_db.py keeps fresh, a custom Python function) plus three mqtt checks against `mosquitto` and two docker checks through `docker-socket-proxy`.
-  # It listens on 0.0.0.0 inside the compose network only (no ports published); the examples are copied to /tmp so the checker's
-  # repo mount can stay read-only.
+  # that update_demo_db.py keeps fresh, a custom Python function) plus three mqtt checks against `mosquitto` and three
+  # docker checks through `docker-socket-proxy` (image_vulns with Trivy from `trivy-bin`, which reads the local images
+  # through the proxy too: DOCKER_HOST; its database is kept in a volume, the first scan downloads it).
+  # MagicMirror reaches it inside the compose network (http://checker:8099); its port is also published to this PC only
+  # (127.0.0.1), for its own pages in a browser: http://localhost:8099/, /results and /vulns. The `demo` service also
+  # listens on 8099 inside the network and stays unpublished: only one of them can have the PC's port. The examples
+  # are copied to /tmp so the checker's repo mount can stay read-only.
   #   docker compose -f compose.dev.yaml up -d checker
   checker:
     image: ghcr.io/astral-sh/uv:0.13.7-python3.14-alpine
-    depends_on: [mosquitto, mqtt-publisher, docker-socket-proxy]
+    depends_on:
+      mosquitto:
+        condition: service_started
+      mqtt-publisher:
+        condition: service_started
+      docker-socket-proxy:
+        condition: service_started
+      trivy-bin:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8099:8099"   # its own pages (/, /results, /vulns) in a browser on this PC; not on the network
     working_dir: /tmp
     environment:
       UV_PROJECT_ENVIRONMENT: /tmp/venv
       UV_CACHE_DIR: /tmp/uv-cache
       UV_LINK_MODE: copy
+      DOCKER_HOST: tcp://docker-socket-proxy:2375 # for Trivy: local images through the read-only proxy
+      HOME: /tmp
     volumes:
       - ./checker:/checker:ro
       - ./dev/checker.toml:/dev-checker.toml:ro
+      - trivy_bin:/trivy:ro
+      - trivy_cache:/trivy-cache
     command:
       - sh
       - -c
@@ -92,3 +119,7 @@ services:
 volumes:
   node_modules:
     name: mmm-anystatus-node_modules
+  trivy_bin:
+    name: mmm-anystatus-trivy-bin
+  trivy_cache:
+    name: mmm-anystatus-trivy-cache # Trivy's database: downloaded once, not on every start

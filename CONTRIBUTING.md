@@ -26,6 +26,16 @@ MagicMirror (server only, image pinned in `compose.dev.yaml`) with this folder m
 `modules/MMM-AnyStatus` and `dev/config.js` as its config. Edit the module, reload the browser; a change to
 `node_helper.js` needs `docker compose -f compose.dev.yaml restart magicmirror`.
 
+The fourth instance, under the left column, shows the real checker (`checker/`, running `dev/checker.toml`: the
+example checks, three mqtt checks against the compose `mosquitto`, and three Docker checks through a read-only
+socket proxy, `image_vulns` among them, with Trivy copied in from its own image by the `trivy-bin` service). It starts
+with MagicMirror, or alone with `docker compose -f compose.dev.yaml up -d checker`. MagicMirror reaches it inside the
+compose network; its own pages are also published to this PC (127.0.0.1 only, not on the network):
+<http://localhost:8099/> (an overview), <http://localhost:8099/results> (the JSON) and
+<http://localhost:8099/vulns> (the vulnerabilities of the dev stack's own images). The first `image_vulns` run
+downloads Trivy's database into a volume, so `/vulns` says "No run yet." for a few minutes after the first start. The
+demo server also listens on 8099, inside the network only.
+
 Without Docker for MagicMirror, run the demo server alone:
 `uv run --no-project --python 3.14 examples/hand-written/serve.py --demo`.
 
