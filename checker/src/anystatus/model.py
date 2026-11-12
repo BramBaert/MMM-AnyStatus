@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -82,16 +83,36 @@ class Core:
     unit: str | None = None
 
 
+NEVER = math.inf  # a `show_after` (or schedule) time of "never": the level is skipped
+
+
+@dataclass(frozen=True)
+class ShowAfter:
+    """How long (seconds) a level must last before it shows; 0 is at once, NEVER skips the level."""
+
+    warn: float = 0.0
+    crit: float = 0.0
+    unknown: float = 0.0
+
+
+@dataclass(frozen=True)
+class Streaks:
+    """Since when the runs, without a break, have seen a level: `warn` counts runs that saw warn or crit, `crit` runs
+    that saw crit, `unknown` failures. None: the last run broke that streak. Times are when those runs started."""
+
+    warn: datetime | None = None
+    crit: datetime | None = None
+    unknown: datetime | None = None
+
+
 @dataclass(frozen=True)
 class Reported:
-    """The last reported (confirmed) result of a check, plus the debounce streak if a change is pending."""
+    """The last reported (shown) result of a check, plus the streaks that `show_after` measures."""
 
     core: Core
     ts: datetime  # when the run that made this finished
     since: datetime  # when the reported level started
-    cand_level: Level | None = None
-    cand_count: int = 0
-    cand_since: datetime | None = None
+    streaks: Streaks = field(default_factory=Streaks)
 
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")

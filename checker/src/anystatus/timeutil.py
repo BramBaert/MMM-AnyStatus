@@ -37,6 +37,39 @@ def parse_duration(value: object) -> float:
     raise ValueError("not a duration")
 
 
+_WAIT_PART = re.compile(r"(\d+(?:\.\d+)?)([dhms])")
+
+
+def parse_wait(value: object) -> float:
+    """A `show_after` or schedule time: "never" (math.inf), or a duration in s, m, h, d only ("0d", "2m", "1d12h").
+    No weeks, months or years, and no bare numbers: the unit is always written. Raises ValueError."""
+    if not isinstance(value, str):
+        raise ValueError('must be a time such as "2m", "14d" or "0d", or "never"')
+    text = value.strip().lower()
+    if text == "never":
+        return math.inf
+    pos, total = 0, 0.0
+    while pos < len(text):
+        m = _WAIT_PART.match(text, pos)
+        if m is None:
+            break
+        total += float(m.group(1)) * _UNITS[m.group(2)]
+        pos = m.end()
+    if not text or pos != len(text):
+        raise ValueError(f'"{value}" is not a time: use s, m, h or d, such as "2m", "14d", "0d" (at once), or "never"')
+    return total
+
+
+def format_wait(seconds: float) -> str:
+    """A `show_after` time as written back in messages: "never", "2m", "1d", "90s"."""
+    if math.isinf(seconds):
+        return "never"
+    for size, unit in ((86400.0, "d"), (3600.0, "h"), (60.0, "m")):
+        if seconds >= size and seconds % size == 0:
+            return f"{seconds / size:g}{unit}"
+    return f"{seconds:g}s"
+
+
 def format_duration(seconds: float) -> tuple[float, str]:
     """The largest unit that fits, one decimal: 3.1 d, 5.0 h, 12.0 min, 40.0 s."""
     magnitude = abs(seconds)

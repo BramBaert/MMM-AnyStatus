@@ -1,5 +1,5 @@
 """Running checks on their intervals. The clock and the way a run is launched are injected, so the rules (spread,
-start-to-start intervals, never overlapping, timeouts, a hung thread is not restarted, debounce, continuity after a
+start-to-start intervals, never overlapping, timeouts, a hung thread is not restarted, show_after, continuity after a
 restart) are tested without sleeping.
 
 All scheduler state is touched from one thread only (the one that calls tick). Worker threads only run the check and
@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from anystatus.document import Snapshot, render_result
 from anystatus.errors import describe_exception, mask
-from anystatus.judge import judge, step
+from anystatus.judge import judge, lasted, step
 from anystatus.model import CheckFailure, Core, Failure, Outcome, Passthrough, Reported
 from anystatus.passthrough import render_passthrough
 from anystatus.store import Store
@@ -141,17 +141,18 @@ class StoreMemory:
 class Slot:
     spec: CheckSpec
     next_due: float
-    state: Reported | None = None  # what the debounce continues from (None: start fresh)
+    state: Reported | None = None  # what show_after continues from (None: start fresh)
     served: Reported | None = None  # what is reported now
     handle: Handle | None = None
     started: float = 0.0
+    started_at: datetime | None = None  # wall time of the current run's start: show_after measures between starts
     zombie: Handle | None = None  # a timed-out run whose thread is still alive
     runs: int = 0
     # The results of a check that serves several (or someone else's) results as they are (Passthrough). They carry
     # their own ts, so keeping them after a failure is honest: they age out by themselves.
     passthrough: list[dict[str, Any]] | None = None
     passthrough_prefixed: bool = False  # a document's results (own ids) rather than one result under the check's id
-    passthrough_failures: int = 0  # failures in a row since the last good read
+    passthrough_failing: datetime | None = None  # start of the first failed read in a row since the last good one
 
 
 class Scheduler:
@@ -194,7 +195,7 @@ class Scheduler:
                     slot.state = row
                 else:
                     # Down longer than the ttl: nobody knows what happened in between. The old result is still
-                    # served (honest: its ts is old); since and the debounce streak start fresh with the next run.
+                    # served (honest: its ts is old); since and the streaks start fresh with the next run.
                     log.info("%s: stored result is older than its ttl, starting without since and streak", spec.id)
             self.slots.append(slot)
             self._start_check(spec, extras.get(spec.id), wall)
@@ -227,6 +228,7 @@ class Scheduler:
             if slot.handle is None and slot.zombie is None and mono >= slot.next_due:
                 slot.handle = self.launcher.launch(slot.spec)
                 slot.started = mono
+                slot.started_at = self.clock.now()
                 slot.next_due = mono + slot.spec.interval  # start to start
         if changed:
             self._publish()
@@ -274,25 +276,27 @@ class Scheduler:
 
     def _finish(self, slot: Slot, outcome: Outcome, ts: datetime) -> None:
         spec = slot.spec
+        started = slot.started_at or ts
         if isinstance(outcome, Passthrough):
-            # Served as the file says: no judge, no debounce, no new ts, and nothing for the memory file (a restart
-            # simply reads the file again). The debounce state is dropped so that a later failure starts fresh.
+            # Served as the file says: no judge, no show_after, no new ts, and nothing for the memory file (a restart
+            # simply reads the file again). The streaks are dropped so that a later failure starts fresh.
             slot.passthrough = render_passthrough(spec, outcome, ts)
             slot.passthrough_prefixed = outcome.prefixed
-            slot.passthrough_failures = 0
+            slot.passthrough_failing = None
             slot.state = slot.served = None
             slot.runs += 1
             log.debug("%s: run finished: %d result(s) from the file", spec.id, len(slot.passthrough))
             return
         if slot.passthrough is not None and isinstance(outcome, Failure):
-            # A failed read (a file being rewritten, a mount that blinks) is debounced like any failure: until it is
-            # confirmed, the last results stay served as they were. Once confirmed it shows; a document's results
+            # A failed read (a file being rewritten, a mount that blinks) waits for show_after.unknown like any
+            # failure: until then, the last results stay served as they were. Then it shows; a document's results
             # stay next to it and age out by their own ttl, a single result (same id as the check) is replaced.
-            slot.passthrough_failures += 1
-            if slot.passthrough_failures < spec.confirm:
+            slot.passthrough_failing = slot.passthrough_failing or started
+            if not lasted(slot.passthrough_failing, spec.show_after.unknown, started):
                 slot.runs += 1
                 log.info("%s: failed, not shown yet: %s", spec.id, mask(outcome.summary, spec.secrets))
                 return
+            started = slot.passthrough_failing  # nothing else is known (state is None): its since is the first miss
             if slot.passthrough_prefixed:
                 slot.passthrough = [r for r in slot.passthrough if r["id"] != spec.id]
             else:
@@ -301,7 +305,7 @@ class Scheduler:
             slot.passthrough = None
         previous = slot.served.core.level if slot.served else None
         core = judge(spec, outcome)
-        reported = step(slot.state, core, ts, spec.confirm)
+        reported = step(slot.state, core, ts, spec.show_after, started)
         slot.state = slot.served = reported
         slot.runs += 1
 

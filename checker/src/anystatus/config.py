@@ -11,12 +11,13 @@ from string import Formatter
 from typing import Any
 
 from anystatus.checks import REGISTRY, SECTIONS, Check
-from anystatus.model import ID_PATTERN, Worse
+from anystatus.model import ID_PATTERN, ShowAfter, Worse
 from anystatus.table import ConfigError, Context, Table
+from anystatus.timeutil import format_wait, parse_wait
 
 DEFAULT_INTERVAL = 300.0
 DEFAULT_TIMEOUT = 10.0
-DEFAULT_CONFIRM = 2
+SHOW_AFTER_LEVELS = ("warn", "crit", "unknown")
 DEFAULT_LISTEN = "127.0.0.1:8099"
 DEFAULT_STATE = "anystatus.sqlite"
 GENERIC_PLACEHOLDERS = frozenset({"value", "unit"})
@@ -38,7 +39,7 @@ class CheckSpec:
     interval: float
     timeout: float
     ttl: float
-    confirm: int
+    show_after: ShowAfter
     limits: Limits
     summary: str | None
     check: Check
@@ -114,7 +115,9 @@ def build_config(raw: Mapping[str, Any], base_dir: Path, env: Mapping[str, str])
     defaults = Table(_as_dict(raw.get("defaults", {}), "[defaults]", ctx), "[defaults]", ctx)
     default_interval = defaults.duration("interval", DEFAULT_INTERVAL)
     default_timeout = defaults.duration("timeout", None)
-    default_confirm = defaults.integer("confirm", DEFAULT_CONFIRM)
+    _no_confirm(defaults)
+    default_show_after = read_show_after(defaults)
+    _warn_short_waits(defaults, default_show_after, default_interval or DEFAULT_INTERVAL)
     defaults.finish()
 
     entries = raw.get("check", [])
@@ -126,7 +129,7 @@ def build_config(raw: Mapping[str, Any], base_dir: Path, env: Mapping[str, str])
         ctx.errors.append("no checks configured: add at least one [[check]]")
     seen: set[str] = set()
     for index, entry in enumerate(entries, start=1):
-        spec = _build_check(entry, index, ctx, default_interval or DEFAULT_INTERVAL, default_timeout, default_confirm)
+        spec = _build_check(entry, index, ctx, default_interval or DEFAULT_INTERVAL, default_timeout, default_show_after)
         if spec is None:
             continue
         if spec.id in seen:
@@ -146,13 +149,50 @@ def _as_dict(value: Any, where: str, ctx: Context) -> dict[str, Any]:
     return {}
 
 
+def _no_confirm(t: Table) -> None:
+    if t.has("confirm"):
+        t.raw("confirm")
+        t.error(
+            "'confirm' has been replaced by 'show_after': a time per level, "
+            'such as show_after = { warn = "14d", crit = "7d", unknown = "2m" } (see docs/checker.md)'
+        )
+
+
+def read_show_after(t: Table, key: str = "show_after") -> dict[str, float]:
+    """A table of level -> time ("2m", "0d", "never"), for the levels it names. Records problems on the table."""
+    value = t.raw(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        t.error(f"'{key}' must be a table, such as {{ unknown = \"2m\" }}")
+        return {}
+    out: dict[str, float] = {}
+    for level, text in value.items():
+        if level not in SHOW_AFTER_LEVELS:
+            t.error(f"'{key}': '{level}' is not a level that can wait (use warn, crit, unknown)")
+            continue
+        try:
+            out[level] = parse_wait(text)
+        except ValueError as exc:
+            t.error(f"'{key}.{level}': {exc}")
+    return out
+
+
+def _warn_short_waits(t: Table, waits: Mapping[str, float], interval: float) -> None:
+    """A time shorter than the interval means "at the next run": allowed, but probably not what was meant. Checked
+    where the time is written, so a [defaults] time doesn't warn about every check with a longer interval."""
+    for level, wait in waits.items():
+        if 0 < wait < interval:
+            t.warning(f"'show_after.{level}' ({format_wait(wait)}) is shorter than the interval ({format_wait(interval)}): it means at the next run")
+
+
 def _build_check(
     entry: Mapping[str, Any],
     index: int,
     ctx: Context,
     default_interval: float,
     default_timeout: float | None,
-    default_confirm: int,
+    default_show_after: Mapping[str, float],
 ) -> CheckSpec | None:
     shown = entry.get("id")
     t = Table(entry, f"check '{shown}'" if isinstance(shown, str) else f"check #{index}", ctx)
@@ -164,7 +204,10 @@ def _build_check(
     label = t.opt_str("label", check_id) or check_id
     group = t.opt_str("group")
     interval = t.duration("interval", default_interval) or default_interval
-    confirm = t.integer("confirm", default_confirm)
+    _no_confirm(t)
+    own = read_show_after(t)
+    _warn_short_waits(t, own, interval)
+    show_after = ShowAfter(**{**default_show_after, **own})  # per level: the check's own time wins over [defaults]
     timeout = t.duration("timeout") or default_timeout or min(DEFAULT_TIMEOUT, interval)
     if timeout > interval:
         t.warning(f"'timeout' is longer than the interval; using the interval ({interval:g} s)")
@@ -209,7 +252,7 @@ def _build_check(
         interval=interval,
         timeout=timeout,
         ttl=ttl,
-        confirm=confirm,
+        show_after=show_after,
         limits=Limits(warn, crit, worse),
         summary=summary,
         check=check,

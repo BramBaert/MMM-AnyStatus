@@ -21,6 +21,7 @@ from anystatus.table import ConfigError
 SCHEMA = json.loads((Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8"))
 TS = "2026-11-11T11:59:00Z"  # a minute before the fake clock's start (12:00:00)
 CHECK = 'id = "jobs"\ntype = "result_file"\npath = "r.json"\ninterval = "1m"\n'  # ttl: 3 x 1 min = 180 s
+UNKNOWN_1M = 'show_after = { unknown = "1m" }\n'
 
 
 @pytest.fixture(autouse=True)
@@ -153,13 +154,13 @@ def test_an_empty_document_is_unknown(tmp_path: Path) -> None:
 
 
 def test_the_level_is_not_debounced_and_ts_is_not_restamped(tmp_path: Path) -> None:
-    w = world(tmp_path, "confirm = 3\n")
+    w = world(tmp_path, 'show_after = { crit = "3m" }\n')
     write(tmp_path, res(level="ok", ts="2026-11-11T11:59:30Z"))
     first = run_once(w)[0]
     assert first["level"] == "ok"
     write(tmp_path, res(level="crit", summary="broke", ts="2026-11-11T11:59:40Z", since="2026-11-11T11:59:40Z"))
     second = run_once(w)[0]
-    assert (second["level"], second["summary"]) == ("crit", "broke")  # at once, although confirm = 3
+    assert (second["level"], second["summary"]) == ("crit", "broke")  # at once, although show_after says 3m
     assert (second["since"], second["ts"]) == ("2026-11-11T11:59:40Z", "2026-11-11T11:59:40Z")
     # the job stops writing: the same file is read again and nothing is made fresher
     for _ in range(3):
@@ -323,9 +324,9 @@ def test_failures_take_the_normal_judge_and_debounce_path(tmp_path: Path) -> Non
     outcome = execute(spec)
     assert outcome == Failure("file not found", outcome.detail if isinstance(outcome, Failure) else None)
     assert judge(spec, outcome).level == "unknown"
-    # a good read followed by a gone file: debounced like any failure (confirm = 2), so the first miss keeps the
-    # file's last result as it was (its own ts: it still ages out honestly) ...
-    w = world(tmp_path)
+    # a good read followed by a gone file: waits for show_after.unknown like any failure, so the first miss keeps
+    # the file's last result as it was (its own ts: it still ages out honestly) ...
+    w = world(tmp_path, UNKNOWN_1M)
     write(tmp_path, res(level="ok"))
     first = run_once(w)[0]
     assert first["level"] == "ok"
@@ -339,18 +340,27 @@ def test_failures_take_the_normal_judge_and_debounce_path(tmp_path: Path) -> Non
     assert run_once(w)[0]["level"] == "warn"
 
 
-def test_a_confirmed_failure_shows_next_to_a_documents_last_results(tmp_path: Path) -> None:
-    """A document's results have their own ids and ts: after a confirmed failure they stay (and age out by their own
-    ttl) next to the failure, so a red result can't vanish behind one grey "file not found"."""
-    w = world(tmp_path)
+def test_a_failure_that_shows_does_so_next_to_a_documents_last_results(tmp_path: Path) -> None:
+    """A document's results have their own ids and ts: once a failure shows, they stay (and age out by their own
+    ttl) next to it, so a red result can't vanish behind one grey "file not found"."""
+    w = world(tmp_path, UNKNOWN_1M)
     write(tmp_path, doc(res(id="db", level="crit", summary="dump failed")))
     kept = run_once(w)
     assert [r["id"] for r in kept] == ["jobs/db"]
     (tmp_path / "r.json").unlink()
-    assert run_once(w) == kept  # not confirmed yet
-    results = run_once(w)
+    assert run_once(w) == kept  # 12:01, the first miss: not shown yet
+    results = run_once(w)  # 12:02: the failure has lasted its minute
     assert [(r["id"], r["level"]) for r in results] == [("jobs", "unknown"), ("jobs/db", "crit")]
+    assert results[0]["since"] == "2026-11-11T12:01:00Z"  # since the first miss
     assert results[1] == kept[0]  # unchanged, own ts
+
+
+def test_without_show_after_a_failed_read_shows_at_once(tmp_path: Path) -> None:
+    w = world(tmp_path)
+    write(tmp_path, res(level="ok"))
+    run_once(w)
+    (tmp_path / "r.json").unlink()
+    assert [(r["id"], r["level"]) for r in run_once(w)] == [("jobs", "unknown")]
 
 
 def test_the_partial_write_is_read_again_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

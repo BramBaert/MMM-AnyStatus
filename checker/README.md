@@ -114,7 +114,6 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   label = "Website certificate"
   host = "www.example.org"
   interval = "12h"
-  confirm = 1
   ```
 - **`python`**: `function = "module:function"`, optional `path`; the function gets the other keys as a dict and returns
   a number or `anystatus.Observation(level=..., summary=..., value=..., unit=...)`. May be `async`.
@@ -196,13 +195,13 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
 
 - **`result_file`**: reads the file `path`, in which another program (any language) writes a
   [SPEC](../SPEC.md) result, or a whole document, and serves what it says. The file's `level`, `summary`, `value`,
-  `unit`, `since`, `ts` and `ttl` are passed on as they are: **not debounced and not re-stamped**, so a job that stops
+  `unit`, `since`, `ts` and `ttl` are passed on as they are: **not held back by `show_after` and not re-stamped**, so a job that stops
   writing turns grey on time. A single result is served under the check's `id`; the results of a document under
   `<check id>/<their id>` (at most 128 characters in all). `label` and `group` default to the check's. A result that is
   invalid (no `ts` or `ttl`, a time without an offset, a bad level, an id used twice, ...) is shown as `unknown` with
   "invalid in file: <reason>", `ts` = when the file was read, `ttl` = the check's. A missing or unreadable file, one
   that is not JSON, larger than 1 MB, or with an unsupported `spec` (`2.0`) is one `unknown` result under the
-  check's `id`, which does go through `confirm`. `warn`, `crit`, `worse` and `summary` are a config error. Have the
+  check's `id`, which does wait for `show_after.unknown`. `warn`, `crit`, `worse` and `summary` are a config error. Have the
   writer rename a finished file into place, so nobody reads half of it.
 
   ```toml
@@ -280,8 +279,7 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   over https; `localhost` and `127.x` over http (as Docker does). Private registries:
   `registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }` maps a registry host to an environment variable that holds
   **`user:password`** (for ghcr.io a personal access token as the password). It is sent only to that registry's own
-  token service (or Docker Hub's), never to another host a registry names. The usual interval is a day
-  (`confirm = 1`).
+  token service (or Docker Hub's), never to another host a registry names. The usual interval is a day.
 
   **`image_vulns`**: runs [Trivy](https://trivy.dev) (`trivy image --format json --ignore-unfixed --quiet --scanners
   vuln <image>`, a list, no shell) for each distinct image and counts **only vulnerabilities that have a fix**. A
@@ -314,7 +312,7 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   label = "Image updates"
   docker = "tcp://docker-socket-proxy:2375"
   interval = "1d"
-  confirm = 1
+  show_after = { unknown = "3d" }                   # a registry down for a day doesn't turn the card grey
   ignore = ["postgres"]
   registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }   # GHCR_AUTH=user:token
 
@@ -325,7 +323,6 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   docker = "tcp://docker-socket-proxy:2375"
   interval = "1d"
   timeout = "15m"
-  confirm = 1
   trivy = "/usr/local/bin/trivy"
   cache_dir = "/var/cache/trivy"
   env = ["HOME", "DOCKER_HOST"]
@@ -358,8 +355,24 @@ services:
 and `docker = "tcp://docker-socket-proxy:2375"` in the checks. `compose.dev.yaml` in this repository runs exactly
 this for the dev stack; a `POST /containers/create` through it answers `403 Forbidden`.
 
-Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `confirm`, `warn`, `crit`, `worse` and `summary`
-(a template: `"last backup {age} ago"`), as described in docs/checker.md.
+Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `show_after`, `warn`, `crit`, `worse` and
+`summary` (a template: `"last backup {age} ago"`), as described in docs/checker.md.
+
+### `show_after`: how long a level must last before it shows
+
+```toml
+show_after = { warn = "14d", crit = "7d", unknown = "2m" }
+```
+
+A level shows once it has lasted its time; until then the highest lower level whose time has passed is shown (a run
+that sees `crit` counts towards `warn` too). With the line above, a check that keeps seeing `crit` stays green for 7
+days and then turns red: amber would only show after 14. `{ warn = "0d", crit = "7d" }` is amber at once and red
+after 7 days. **Getting better always shows at once.** A failure (`unknown`) has no lower level: until its time has passed the last result stays.
+Times use `s`, `m`, `h`, `d` (`"30d"` for a month); `"0d"` is at once, `"never"` skips the level. **A level without a
+time shows at once** (there is no default); `[defaults]` can hold `show_after`, and a check's own table overrides it
+per level. A level shows at the first run at or after its time has passed: never early, at most one `interval` late
+(a time shorter than the interval means "at the next run", and the config warns about it). `confirm`, which this
+replaces, is a config error. Details: [docs/checker.md](../docs/checker.md).
 
 Secrets never sit in the file: a key ending in `_env` names an environment variable (`password_env = "DB_PASSWORD"`).
 

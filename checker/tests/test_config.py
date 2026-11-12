@@ -6,17 +6,17 @@ import pytest
 from helpers import parse
 
 from anystatus.config import template_fields
-from anystatus.model import Failure, Observation
+from anystatus.model import NEVER, Failure, Observation, ShowAfter
 from anystatus.scheduler import execute
 from anystatus.table import ConfigError
-from anystatus.timeutil import format_duration, parse_duration
+from anystatus.timeutil import format_duration, parse_duration, parse_wait
 
 GOOD = """
 [checker]
 name = "t"
 [defaults]
 interval = "5m"
-confirm = 3
+show_after = { unknown = "10m", warn = "1h" }
 [[check]]
 id = "a"
 type = "scripted"
@@ -61,14 +61,65 @@ def test_duration_reporting_uses_the_largest_unit(seconds: float, expected: tupl
 
 def test_defaults_apply_and_ttl_is_three_intervals(tmp_path: Path) -> None:
     spec = parse(GOOD, tmp_path).checks[0]
-    assert (spec.interval, spec.confirm, spec.ttl, spec.label) == (300.0, 3, 900.0, "a")
+    assert (spec.interval, spec.ttl, spec.label) == (300.0, 900.0, "a")
+    assert spec.show_after == ShowAfter(warn=3600, crit=0, unknown=600)  # crit: no time anywhere, so at once
     assert spec.timeout == 10.0
 
 
 def test_a_check_overrides_defaults(tmp_path: Path) -> None:
-    text = GOOD + 'interval = "30s"\nconfirm = 1\nttl = "10m"\nlabel = "Nice"\ngroup = "g"\n'
+    text = GOOD + 'interval = "30s"\nshow_after = { warn = "0d", crit = "never" }\nttl = "10m"\nlabel = "Nice"\ngroup = "g"\n'
     spec = parse(text, tmp_path).checks[0]
-    assert (spec.interval, spec.confirm, spec.ttl, spec.label, spec.group) == (30.0, 1, 600.0, "Nice", "g")
+    assert (spec.interval, spec.ttl, spec.label, spec.group) == (30.0, 600.0, "Nice", "g")
+    # per level: the check's own times win, the default's other levels stay
+    assert spec.show_after == ShowAfter(warn=0, crit=NEVER, unknown=600)
+
+
+def test_no_show_after_means_at_once(tmp_path: Path) -> None:
+    spec = parse('[[check]]\nid = "a"\ntype = "scripted"\n', tmp_path).checks[0]
+    assert spec.show_after == ShowAfter(0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    ("value", "seconds"),
+    [("0d", 0.0), ("2m", 120.0), ("14d", 14 * 86400.0), ("1d12h", 1.5 * 86400), ("30s", 30.0), ("never", NEVER), ("Never", NEVER)],
+)
+def test_show_after_times(value: str, seconds: float) -> None:
+    assert parse_wait(value) == seconds
+
+
+@pytest.mark.parametrize("value", ["1w", "1y", "2mo", "5", "", "soon", 5, True])
+def test_bad_show_after_times(value: object) -> None:
+    with pytest.raises(ValueError):
+        parse_wait(value)
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        ('show_after = { warn = "2w" }', "'show_after.warn': \"2w\" is not a time"),
+        ("show_after = { warn = 60 }", "'show_after.warn': must be a time"),
+        ('show_after = { ok = "1m" }', "'ok' is not a level that can wait"),
+        ('show_after = "2m"', "'show_after' must be a table"),
+    ],
+)
+def test_show_after_errors(tmp_path: Path, line: str, message: str) -> None:
+    errs = problems(f'[[check]]\nid = "a"\ntype = "scripted"\n{line}\n', tmp_path)
+    assert any(message in e for e in errs), errs
+
+
+def test_confirm_is_gone_and_says_what_replaced_it(tmp_path: Path) -> None:
+    for text in ('[[check]]\nid = "a"\ntype = "scripted"\nconfirm = 2\n', '[defaults]\nconfirm = 2\n[[check]]\nid = "a"\ntype = "scripted"\n'):
+        (err,) = problems(text, tmp_path)
+        assert "'confirm' has been replaced by 'show_after'" in err
+
+
+def test_a_show_after_shorter_than_the_interval_is_a_warning(tmp_path: Path) -> None:
+    text = '[[check]]\nid = "a"\ntype = "scripted"\ninterval = "5m"\nshow_after = { unknown = "2m", warn = "0d", crit = "5m" }\n'
+    config = parse(text, tmp_path)
+    assert config.warnings == ("check 'a': 'show_after.unknown' (2m) is shorter than the interval (5m): it means at the next run",)
+    # [defaults] is compared with the default interval, not with every check's own
+    text = '[defaults]\ninterval = "1m"\nshow_after = { unknown = "30s", warn = "2m" }\n[[check]]\nid = "a"\ntype = "scripted"\ninterval = "1d"\n'
+    assert parse(text, tmp_path).warnings == ("[defaults]: 'show_after.unknown' (30s) is shorter than the interval (1m): it means at the next run",)
 
 
 def test_unknown_keys_are_errors(tmp_path: Path) -> None:
@@ -82,7 +133,7 @@ def test_all_problems_are_listed_together(tmp_path: Path) -> None:
 listen = "nonsense"
 colour = "red"
 [defaults]
-confirm = 0
+show_after = { warn = "soon" }
 [[check]]
 id = "a"
 type = "nosuchtype"
@@ -103,7 +154,7 @@ type = "scripted"
     for fragment in (
         "listen",
         "colour",
-        "confirm",
+        "show_after.warn",
         "nosuchtype",
         "interval",
         "out of order",

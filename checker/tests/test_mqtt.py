@@ -318,8 +318,8 @@ def test_broker_not_connected_is_a_failure(tmp_path: Path) -> None:
         rig.run()
 
 
-def test_failure_is_debounced_by_confirm(tmp_path: Path) -> None:
-    w = make_world(BROKER + check_cfg('interval = "1m"\nconfirm = 2'), tmp_path)
+def test_failure_waits_for_show_after(tmp_path: Path) -> None:
+    w = make_world(BROKER + check_cfg('interval = "1m"\nshow_after = { unknown = "1m" }'), tmp_path)
     check: MqttCheck = w.config.checks[0].check  # type: ignore[assignment]
     check.now = w.clock.now
     connect(check)

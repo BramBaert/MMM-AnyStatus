@@ -13,7 +13,10 @@ state = "example-state.sqlite"   # relative to this file
 
 [defaults]
 interval = "30s"
-confirm = 2                 # a change of level must be seen twice in a row before it is shown
+# show_after: how long a level must last before it shows (s, m, h, d; "0d" = at once, "never" = skip that level).
+# A level without one shows at once, and getting better always shows at once. Here: a check that fails once or twice
+# (a blip) doesn't turn its card grey; one that fails for a minute does.
+show_after = { unknown = "1m" }
 
 # 1. ping: runs the system `ping`. Value: the average round trip in ms.
 [[check]]
@@ -25,6 +28,9 @@ host = "localhost"
 count = 2
 warn = 50                   # ms
 crit = 200
+# A slow or dropped ping now and then is normal: show amber or red only when it lasts a minute, grey after two.
+# Per level, this replaces what [defaults] says (unknown); levels it doesn't name keep the default's.
+show_after = { warn = "1m", crit = "1m", unknown = "2m" }
 
 # 2. sql_age: how old is the newest timestamp in a table? The script update_demo_db.py keeps this one fresh.
 [[check]]
@@ -45,8 +51,7 @@ id = "demo.nightly"
 type = "sql_age"
 label = "Nightly job (stale on purpose)"
 group = "demo"
-confirm = 1                 # a daily check: show a problem at once
-interval = "5m"
+interval = "5m"             # no show_after for warn or crit: a missed nightly run shows at once
 database = "sqlite:demo.sqlite"
 query = "SELECT max(finished_at) FROM nightly_runs WHERE ok = 1"
 timezone = "UTC"
@@ -100,7 +105,7 @@ warn = "2m"
 crit = "10m"
 
 # 8. result_file: another program writes a result in the SPEC format, the checker serves it as it is (no limits, no
-#    debounce, the file's own ts and ttl). update_demo_db.py rewrites demo_result.json every run; stop it and the
+#    show_after, the file's own ts and ttl). update_demo_db.py rewrites demo_result.json every run; stop it and the
 #    card turns grey after the file's ttl (90 s), because nothing makes it look fresh.
 [[check]]
 id = "demo.job"

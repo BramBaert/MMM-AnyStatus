@@ -25,7 +25,7 @@ state = "anystatus.sqlite"     # relative to the config file
 
 [defaults]                     # apply to every check unless it says otherwise
 interval = "5m"
-confirm = 2
+show_after = { unknown = "10m" }   # one failed run doesn't turn a card grey
 
 [[check]]
 id = "backup.nas"
@@ -84,18 +84,43 @@ debug level, also with secrets masked.
   honest answer for a check that hangs.
 - A result's `ts` is when its run finished.
 
-## Debounce: `confirm`
+## `show_after`: how long a level must last before it shows
 
-A check that flips back and forth must not make the display flicker, so a new level has to be seen **`confirm`
-runs in a row** before it is reported. Default 2; for a daily check, set `confirm = 1` (otherwise a problem takes a
-day longer to show).
+A check that flips back and forth must not make the display flicker, and some problems only matter once they last.
+So each level can have a time:
 
-- While a change is waiting for confirmation, the checker keeps reporting the **last confirmed result** (level,
-  summary, value), with the new `ts`. The check did run; it just hasn't changed its mind yet.
-- Failures (`unknown`) are confirmed the same way, so one dropped ping doesn't turn the card grey.
-- When a change is confirmed, its `since` is when the streak **started** (the first run that saw the new level),
-  not when it was confirmed: the display should say when the problem began.
-- A change of value or summary within the same level changes nothing about `since`.
+```toml
+show_after = { warn = "14d", crit = "7d", unknown = "2m" }
+```
+
+- **A level shows once it has lasted its time.** `ok`, `warn` and `crit` are ordered: a run that sees `crit` also
+  counts towards `warn`. Until a level's time has passed, **the highest lower level whose time has passed** is
+  shown, with this run's summary and value. With `{ warn = "0d", crit = "7d" }`, a check that keeps seeing `crit` is
+  amber at once and red after 7 days; with `{ warn = "14d", crit = "7d" }` it is green for 7 days and then red
+  (amber's own time hasn't passed by then). Green has no time: it always qualifies.
+- **Getting better is reported at once** (green is green). That follows from the rule: a better level's streak is
+  at least as long as the worse one's. Flapping around a limit is still absorbed, because the worse level has to
+  last its time again.
+- **`unknown` (a failure) has no lower level:** until its time has passed, the last shown result stays, with the
+  new `ts` (the check did run; it just couldn't find out). A failure neither breaks nor extends the `warn` and `crit`
+  streaks: that run saw nothing.
+- **Shown at the first run at or after the time has passed:** never early, at most one `interval` late. Times are
+  measured between the *starts* of runs, which are at least an interval apart, so a slow run doesn't push it one more
+  interval. A time shorter than the interval means "at the next run"; the config warns about it, as it does about a
+  `timeout` longer than the interval (a check's own times against its interval, `[defaults]`' against the default
+  interval).
+- **Units:** `s`, `m`, `h`, `d` only, also combined (`"1d12h"`); no weeks, months or years (a month is `"30d"`), and
+  no bare numbers. `"0d"` is at once; `"never"` skips the level (written out, not implied by a missing key).
+- **No default:** a level without a time shows at once. `[defaults]` can hold `show_after`; a check's own table
+  replaces it per level (the levels it doesn't name keep the default's).
+- `since`: a level that shows because things got worse starts at its streak, when the problem **began** (the first
+  run that saw it), not when it was shown. A level that shows because things got better starts at this run. A
+  change of value or summary within the same shown level changes nothing about `since`.
+- The first run of a check is no exception: with `crit = "5m"`, a first run that sees `crit` shows green (with its
+  summary) until the streak has lasted 5 minutes.
+- `confirm`, the count of runs it replaces, is a config error that names `show_after`. A time rather than a count
+  means the same in every check type and in `image_vulns`' schedule, and keeps its meaning when the `interval`
+  changes.
 
 ## `since`, `ttl` and `ts`
 
@@ -111,20 +136,23 @@ One row per check id, written after every run (one transaction):
 | `id` | the check's id |
 | `result` | the last reported result (JSON, as served) |
 | `since` | when the reported level started |
-| `candidate_level`, `candidate_count`, `candidate_since` | the debounce streak, if a change is pending |
+| `warn_since`, `crit_since`, `unknown_since` | the streaks `show_after` measures: since when runs saw warn or worse, crit, failures |
 | `updated` | when this row was written |
+| `extra`, `extra_updated` | what a check type keeps for itself (`CheckMemory`: mqtt's last message, `image_vulns`' first-found dates) |
 
 On startup:
 
 - A check with a stored row starts from it, **but only if its stored result is still within its `ttl`**. If the
   checker was down longer than that, nobody knows what happened in between, so continuity is broken: the stored
-  result is still served (it is honest, its `ts` is old and the display turns it grey), but `since` and the debounce
-  streak start fresh with the next run.
+  result is still served (it is honest, its `ts` is old and the display turns it grey), but `since` and the streaks
+  start fresh with the next run. The same goes for a check type's own data (`extra`).
+- A file written by a checker that still counted `confirm` runs (schema version 1) is converted: results, `since`
+  and `extra` carry over, and the streaks of each shown level start at its `since`, so no card changes.
 - A check without a stored row is served as `unknown`, summary "waiting for the first run", `ts` = the time the
   checker started, its normal `ttl`. That is a true statement made at startup, and it keeps a fresh start from
   looking like "no checks reported".
 - Rows of checks no longer in the config are deleted. A renamed id is a new check.
-- The file can be deleted at any time; the cost is losing `since` and pending debounces.
+- The file can be deleted at any time; the cost is losing `since`, the streaks and the check types' own data.
 
 The file uses WAL mode and is only ever touched by the one checker process.
 
@@ -143,9 +171,9 @@ per run at debug. No log file of its own: the service manager or Docker keeps lo
 ## Tests
 
 pytest, ruff, and type hints checked by a type checker (pyright or mypy, whichever is lighter in CI). The scheduler
-and debounce take a clock and run without sleeping, so the rules above (confirm streaks, `since` from the start of
-a streak, restart continuity within/past `ttl`, a hanging thread not restarted) each have a test that runs in
-milliseconds. CI runs on Python 3.11 and 3.14.
+and `show_after` take a clock and run without sleeping, so the rules above (`show_after` streaks, `since` from the
+start of a streak, restart continuity within/past `ttl`, a hanging thread not restarted) each have a test that runs
+in milliseconds. CI runs on Python 3.11 and 3.14.
 
 ## Check types
 
@@ -158,7 +186,7 @@ milliseconds. CI runs on Python 3.11 and 3.14.
 | `interval` | `[defaults]` | how often it runs |
 | `timeout` | 10 s | per run, at most `interval`; some types need more (`image_vulns`) |
 | `ttl` | 3 × `interval` | |
-| `confirm` | `[defaults]`, else 2 | see [Debounce](#debounce-confirm) |
+| `show_after` | `[defaults]` per level, else at once | see [`show_after`](#show_after-how-long-a-level-must-last-before-it-shows) |
 | `warn`, `crit`, `worse` | per type | see [Limits](#limits); some types have default limits |
 | `summary` | per type | a template replacing the type's own text: `"last backup {age} ago"`. Placeholders: `{value}`, `{unit}`, `{age}` (a duration, written as "3.1 d") and the type's own (listed per type) |
 
@@ -268,7 +296,6 @@ type = "tls_expiry"
 label = "Website certificate"
 host = "www.example.org"     # port 443 unless `port`; `servername` if it differs from host
 interval = "12h"
-confirm = 1
 ```
 
 Value: days until the certificate the server presents expires (negative when expired). Default limits: amber at 21
@@ -385,8 +412,8 @@ restarts = 3                              # more restarts than this within `rest
 Reads the Docker API (a few `GET`s, plain HTTP over the socket, no Docker SDK). Per container:
 
 - A listed container that is missing or not running is `crit`.
-- A container that is `unhealthy` is `crit`. One that is still `starting` counts as fine, and `confirm` absorbs the
-  start.
+- A container that is `unhealthy` is `crit`. One that is still `starting` counts as fine; a `show_after` for `crit`
+  absorbs a slow start.
 - Restarting more often than `restarts` within the window is `warn`. A container that keeps restarting does serve
   in between, but something is wrong with it.
 
@@ -411,7 +438,7 @@ type = "docker_updates"
 label = "Image updates"
 group = "docker"
 interval = "1d"
-confirm = 1
+show_after = { unknown = "3d" }   # a registry that is down for a day or two doesn't turn the card grey
 versions = "minor"            # newer tags within the same major (default); "major" includes major bumps; "none"
 ignore = ["postgres"]         # images to skip
 ```
@@ -439,7 +466,6 @@ label = "Vulnerabilities"
 group = "docker"
 interval = "1d"
 timeout = "15m"             # the first run downloads Trivy's database
-confirm = 1
 trivy = "trivy"             # the command, or a path
 ```
 
@@ -486,15 +512,15 @@ results are all taken over. **Any language can report this way, without a push e
 result by hand" example from design.md.
 
 The file's `ts` and `ttl` are passed on unchanged, so a job that stops writing still turns grey on time, and the
-checker doesn't make it look fresh. The file's level isn't debounced, because the job decided it. Ids in a document
+checker doesn't make it look fresh. The file's level isn't held back by `show_after`, because the job decided it. Ids in a document
 are prefixed with this check's id (`jobs.nightly/<id>`) so they can't clash. A result without a `label` is named by
 its own id (in a document) or by the check's `label` (a single result). `warn`, `crit`, `worse` and `summary` are a
 config error here.
 
 **Reading the file can fail** (missing, unreadable, not JSON, over 1 MB, an unsupported spec): that is `unknown`
-under the check's own id, **debounced by `confirm`** like any failure, so a job that rewrites its file in place
-doesn't make the display blink. Until the failure is confirmed, the last results stay served as they were (they
-carry their own `ts`, so they still age out on time). Once it shows, a single result is replaced by it; a document's
+under the check's own id, **held back by `show_after.unknown`** like any failure, so a job that rewrites its file in
+place doesn't make the display blink. Until then, the last results stay served as they were (they carry their own
+`ts`, so they still age out on time). Once it shows, a single result is replaced by it; a document's
 results stay next to it, so a red result can't vanish behind one grey "file not found". A result in the file that
 breaks SPEC.md is served as `unknown` ("invalid in file: no ttl") under its id. Better still, the job writes to a
 temporary file and renames it.
@@ -582,8 +608,8 @@ Rules:
   time since the latest (re)connect to the broker. Earlier time doesn't count: a message sent while the broker was
   out of reach may have been missed. If that lower bound already reaches `crit`, the result is `crit` ("no
   message for over 10 min"); if it reaches `warn`, `warn`; otherwise `unknown` ("no message yet").
-- **A broker the checker can't reach** makes its checks `unknown` ("broker home unreachable"), debounced by `confirm`
-  like any failure. Reconnecting is automatic, with backoff.
+- **A broker the checker can't reach** makes its checks `unknown` ("broker home unreachable"), held back by
+  `show_after.unknown` like any failure. Reconnecting is automatic, with backoff.
 - `ts` is when the check was evaluated, as for every check. The message time feeds the value, never `ts`.
 - Needs the `mqtt` extra (paho-mqtt), since a subscribe client isn't in the standard library. It is a new kind of
   check: a listener that runs all the time next to periodic evaluation. The step 3 structure has to leave room for

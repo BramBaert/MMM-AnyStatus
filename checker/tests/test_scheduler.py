@@ -61,7 +61,7 @@ def test_next_wakeup_points_at_the_next_start(one_check: Callable[..., World]) -
 def test_a_run_that_times_out_is_a_failure_and_the_hung_thread_is_not_restarted(
     one_check: Callable[..., World],
 ) -> None:
-    w = one_check('timeout = "10s"\nconfirm = 1')
+    w = one_check('timeout = "10s"')
     w.sched.tick()  # started, and never returns
     w.clock.advance(10 + HUNG_GRACE - 0.1)  # the check's own timeout passed; it gets a grace to report it itself
     w.sched.tick()

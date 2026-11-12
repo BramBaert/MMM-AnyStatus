@@ -9,7 +9,7 @@ state = "dev-state.sqlite"
 
 [defaults]
 interval = "30s"
-confirm = 2
+show_after = { unknown = "1m" }
 
 [mqtt.dev]
 host = "mosquitto"
@@ -23,6 +23,7 @@ host = "localhost"
 count = 2
 warn = 50
 crit = 200
+show_after = { warn = "1m", crit = "1m", unknown = "2m" }
 
 [[check]]
 id = "demo.heartbeat"
@@ -40,7 +41,6 @@ id = "demo.nightly"
 type = "sql_age"
 label = "Nightly job (stale on purpose)"
 group = "demo"
-confirm = 1
 database = "sqlite:demo.sqlite"
 query = "SELECT max(finished_at) FROM nightly_runs WHERE ok = 1"
 timezone = "UTC"
@@ -126,4 +126,4 @@ group = "docker"
 docker = "tcp://docker-socket-proxy:2375"
 interval = "1d"
 timeout = "60s"
-confirm = 1
+show_after = { unknown = "2d" }   # a registry that is down for a day doesn't turn the card grey

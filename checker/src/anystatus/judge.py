@@ -1,13 +1,14 @@
-"""From what a run observed to what it reports: apply the limits, the `summary` template, and the debounce."""
+"""From what a run observed to what it reports: apply the limits, the `summary` template, and `show_after`."""
 
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from datetime import datetime
 from string import Formatter
 from typing import TYPE_CHECKING, Any
 
-from anystatus.model import LEVELS, Core, Failure, Level, Observation, Outcome, Reading, Reported
+from anystatus.model import LEVELS, Core, Failure, Level, Observation, Outcome, Reading, Reported, ShowAfter, Streaks
 from anystatus.timeutil import format_duration
 
 if TYPE_CHECKING:
@@ -95,22 +96,59 @@ def _as_mapping(fields: _Fields) -> Any:
     return fields
 
 
-def step(prev: Reported | None, new: Core, ts: datetime, confirm: int) -> Reported:
-    """The debounce. `prev` is the last reported result and its pending streak (None: nothing known yet).
+_RANK = {"ok": 0, "warn": 1, "crit": 2}
 
-    A new level must be seen `confirm` runs in a row before it is reported. While it is pending, the last confirmed
-    core (level, summary, value) is kept, with the new `ts`. When confirmed, `since` is where the streak started.
+
+def lasted(since: datetime | None, wait: float, now: datetime) -> bool:
+    """Has a streak that began at `since` lasted `wait` seconds at `now`? `wait` = inf ("never") never has."""
+    return since is not None and not math.isinf(wait) and (now - since).total_seconds() >= wait
+
+
+def step(prev: Reported | None, new: Core, ts: datetime, show_after: ShowAfter, started: datetime | None = None) -> Reported:
+    """What a run reports, given what was reported before (`prev`, None: nothing known yet) and `show_after`.
+
+    `started` is when the run started (default `ts`); streaks are measured between run starts, which are at least an
+    `interval` apart, so a level never shows early and at most one interval late.
+
+    - ok, warn, crit are ordered. A level shows once the runs have seen it *or worse* for its `show_after` time; until
+      then the highest lower level whose time has passed is shown, with this run's summary and value. So getting
+      better is always reported at once: the better level's streak is at least as long as the worse one's.
+    - unknown (a failure) has no lower level: until its time has passed, the last shown result stays, with the new
+      `ts`. A failure neither breaks nor extends the warn and crit streaks (the run saw nothing).
+    - `since` stays while the shown level stays. A level that shows because it got worse starts at its streak (when
+      the problem began, not when it was shown); one that shows because it got better starts at this run.
     """
-    if prev is None:
-        return Reported(core=new, ts=ts, since=ts)
-    if new.level == prev.core.level:
-        return Reported(core=new, ts=ts, since=prev.since)  # same level: the streak (if any) is broken
-    if confirm <= 1:
-        return Reported(core=new, ts=ts, since=ts)
-    if prev.cand_level == new.level and prev.cand_since is not None:
-        count, started = prev.cand_count + 1, prev.cand_since
+    started = started or ts
+    old = prev.streaks if prev is not None else Streaks()
+    if new.level == "unknown":
+        streaks = Streaks(old.warn, old.crit, old.unknown or started)
+        if prev is not None and not lasted(streaks.unknown, show_after.unknown, started):
+            return Reported(core=prev.core, ts=ts, since=prev.since, streaks=streaks)
+        since = prev.since if prev is not None and prev.core.level == "unknown" else (streaks.unknown or started)
+        return Reported(core=new, ts=ts, since=since, streaks=streaks)
+
+    rank = _RANK[new.level]
+    streaks = Streaks(
+        warn=(old.warn or started) if rank >= 1 else None,
+        crit=(old.crit or started) if rank >= 2 else None,
+    )
+    shown: Level = "ok"
+    if rank >= 2 and lasted(streaks.crit, show_after.crit, started):
+        shown = "crit"
+    elif rank >= 1 and lasted(streaks.warn, show_after.warn, started):
+        shown = "warn"
+
+    if shown == new.level:
+        core = new
+    elif shown == "ok" and prev is not None and prev.core.level == "ok":
+        core = prev.core  # a worse level is waiting: green stays as it was, like a pending change always did
     else:
-        count, started = 1, ts
-    if count >= confirm:
-        return Reported(core=new, ts=ts, since=started)
-    return Reported(core=prev.core, ts=ts, since=prev.since, cand_level=new.level, cand_count=count, cand_since=started)
+        core = replace(new, level=shown)
+
+    if prev is not None and prev.core.level == shown:
+        since = prev.since
+    elif shown != "ok" and (prev is None or prev.core.level not in _RANK or _RANK[shown] > _RANK[prev.core.level]):
+        since = (streaks.crit if shown == "crit" else streaks.warn) or started
+    else:
+        since = started
+    return Reported(core=core, ts=ts, since=since, streaks=streaks)
