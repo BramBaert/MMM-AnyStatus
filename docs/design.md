@@ -149,6 +149,17 @@ How each works in detail: [checker.md](checker.md).
     and `crit` times follow the rules of `show_after`, per CVE instead of per card): ignore it; or amber after *x*
     and red after *y*; or straight to red after *z*, skipping amber. The level of the card is the worst over all
     CVEs. A new critical doesn't inherit the age of an old one: "first found" is kept per CVE and image.
+  - **The clock doesn't restart when a CVE changes class** (kept, Bram, 2026-11-12). So a CVE that was *waiting* for
+    10 days becomes *update* when a newer build appears, and with `update`'s `CRITICAL = { crit = "3d" }` it is red
+    at once, although the fix could only be pulled since today. Bram would prefer a restart in that case, but never
+    one that lowers what the display already shows ("on the display for 10 days, then it drops" would be wrong),
+    if that is simple and adds no corner cases. It isn't: it needs the level at the change kept per CVE, as a floor,
+    and a registry that doesn't answer for a day turns *update* into *waiting* and back, which would restart the
+    clock each time (so the class would have to stay as it was when the registry doesn't answer). Worth revisiting
+    if it bites in practice.
+  - **A CVE in a locally built image's own layers** (a package its Dockerfile installs) is *rebuild* (agreed, Bram,
+    2026-11-12): a fixed version exists and it is in the user's hands. Rebuilding helps when the Dockerfile installs
+    the newest version; if it pins one, the fix is a change to the Dockerfile.
   - **Skipping a level is written out, not left out**, for the human reading the config: `warn = "never"`.
     Leaving a severity out of a class means "don't care", and the example config says so. The README has an
     example that explains the use case of each line.
@@ -228,14 +239,6 @@ What was decided then is built and described above ("From the first real deploym
 
 - **Escalation by age:** "amber for longer than 60 days becomes red" (pending updates are never more than amber).
   `show_after` doesn't do that; it would be one more entry, e.g. `escalate = { crit = "60d" }`.
-- **`image_vulns`: does a CVE's clock restart when its class changes?** As decided, a CVE is counted from when it
-  was first found in an image, whatever its class. So a CVE that was *waiting* for 10 days becomes *update* when the
-  newer build appears, and with `update`'s `CRITICAL = { crit = "3d" }` it is red at once, although the fix could
-  only be pulled since today. Counting from when it entered its class would give the 3 days. Built as decided; to
-  confirm.
-- **`image_vulns`: a CVE in a locally built image's own layers** (a package its Dockerfile installs) is counted as
-  *rebuild*: a fixed version exists and it is in the user's hands. The four classes didn't name this case. Rebuilding
-  helps when the Dockerfile installs the newest version; if it pins one, the fix is a change to the Dockerfile.
 
 ## Future work
 

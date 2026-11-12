@@ -417,13 +417,15 @@ Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `show_aft
 ### `show_after`: how long a level must last before it shows
 
 ```toml
-show_after = { warn = "14d", crit = "7d", unknown = "2m" }
+show_after = { warn = "0d", crit = "7d", unknown = "2m" }
 ```
 
 A level shows once it has lasted its time; until then the highest lower level whose time has passed is shown (a run
-that sees `crit` counts towards `warn` too). With the line above, a check that keeps seeing `crit` stays green for 7
-days and then turns red: amber would only show after 14. `{ warn = "0d", crit = "7d" }` is amber at once and red
-after 7 days. **Getting better always shows at once.** A failure (`unknown`) has no lower level: until its time has passed the last result stays.
+that sees `crit` counts towards `warn` too). With the line above, a check that keeps seeing `crit` is amber at once
+and red after 7 days, and one failed run doesn't turn the card grey; a failure that lasts 2 minutes does. Give a
+lower level a time no longer than a higher one's: with `{ warn = "14d", crit = "7d" }` a check that keeps seeing
+`crit` would be green for 7 days and then jump to red. **Getting better always shows at once.** A failure
+(`unknown`) has no lower level: until its time has passed the last result stays.
 Times use `s`, `m`, `h`, `d` (`"30d"` for a month); `"0d"` is at once, `"never"` skips the level. **A level without a
 time shows at once** (there is no default); `[defaults]` can hold `show_after`, and a check's own table overrides it
 per level. A level shows at the first run at or after its time has passed: never early, at most one `interval` late

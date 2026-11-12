@@ -90,14 +90,16 @@ A check that flips back and forth must not make the display flicker, and some pr
 So each level can have a time:
 
 ```toml
-show_after = { warn = "14d", crit = "7d", unknown = "2m" }
+show_after = { warn = "0d", crit = "7d", unknown = "2m" }
 ```
 
 - **A level shows once it has lasted its time.** `ok`, `warn` and `crit` are ordered: a run that sees `crit` also
   counts towards `warn`. Until a level's time has passed, **the highest lower level whose time has passed** is
-  shown, with this run's summary and value. With `{ warn = "0d", crit = "7d" }`, a check that keeps seeing `crit` is
-  amber at once and red after 7 days; with `{ warn = "14d", crit = "7d" }` it is green for 7 days and then red
-  (amber's own time hasn't passed by then). Green has no time: it always qualifies.
+  shown, with this run's summary and value. With the line above, a check that keeps seeing `crit` is amber at once
+  and red after 7 days. A lower level with a *longer* time than a higher one makes little sense: with
+  `{ warn = "14d", crit = "7d" }` it would be green for 7 days and then jump to red (amber's own time hasn't passed
+  by then). That is what the rule says, and it is not checked: such a config is allowed. Green has no time: it
+  always qualifies.
 - **Getting better is reported at once** (green is green). That follows from the rule: a better level's streak is
   at least as long as the worse one's. Flapping around a limit is still absorbed, because the worse level has to
   last its time again.
