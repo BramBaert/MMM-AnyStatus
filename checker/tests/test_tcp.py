@@ -47,8 +47,12 @@ def test_open_port_gives_the_connect_time(tmp_path: Path) -> None:
 
 def test_limits_apply_to_the_connect_time(tmp_path: Path) -> None:
     with listening() as port:
-        spec = spec_for(tmp_path, port, "warn = 0.00001")
+        # warn = 0: reached by any connect time. The value is rounded to 0.1 ms, so a fast localhost connect reads
+        # 0.0 and a tiny positive limit would make this test depend on the machine's speed.
+        spec = spec_for(tmp_path, port, "warn = 0")
         assert judge(spec, execute(spec)).level == "warn"
+        spec = spec_for(tmp_path, port, "warn = 60000")  # a minute: never reached
+        assert judge(spec, execute(spec)).level == "ok"
 
 
 def test_refused_port_is_crit_not_a_failure(tmp_path: Path) -> None:
