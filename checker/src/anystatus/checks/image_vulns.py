@@ -268,12 +268,13 @@ class ImageVulns(Check):
         timed_out = False
         first_failure = "trivy failed"
         for index, image in enumerate(images):
+            target = image.reference or image.image_id[:19]
             try:
                 target = self._target(image, left())
                 vulns = self._scan(target, left())
                 scanned.append((target, vulns, self._classify(image, target, vulns, run)))
             except CheckFailure as exc:
-                failed.append(image.reference or image.image_id[:19])
+                failed.append(target)  # what was scanned (and its dates are kept under), as far as it got
                 first_failure = exc.summary
                 if exc.summary.startswith("timed out"):
                     timed_out = True
