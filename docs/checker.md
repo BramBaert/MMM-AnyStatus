@@ -439,7 +439,8 @@ ten cards. Make separate checks if they should.
 
 ### Docker access, and what it can read
 
-For `docker_status`, `docker_updates` and `image_vulns` (and Trivy, which reads local images through `DOCKER_HOST`).
+For `docker_status`, `docker_updates` and `image_vulns` (and Trivy, which reads local images through `DOCKER_HOST`,
+set by the checker to the check's own `docker` address).
 
 **Two different risks.** The socket is root on its host: anything that can send it a `POST` can start a privileged
 container, and mounting it `:ro` changes nothing about that (`:ro` protects the socket *file*, not the API). And
@@ -486,8 +487,12 @@ neither it nor linuxserver's fork can tell the container list from a container's
 **What the rest of the setup must do:**
 
 - The proxy gets **no `ports:`**: only a network of its own (`internal: true`) shared with the checker. Never the
-  host's network, the LAN or the internet. On another host (a checker watching several machines), reachable only
-  from the checker's machine: a firewall rule, or a VPN with an access rule.
+  host's network, the LAN or the internet.
+- **Another machine's Docker** (one checker watching several hosts: each Docker check has its own `docker`
+  address): a proxy on that machine, with the same rules, published on one address that only the checker's machine
+  can reach, never the LAN. For example a VPN such as Tailscale: publish the port on that machine's VPN address
+  only, and an access rule that lets only the checker's machine reach that port. The connection carries the image
+  exports Trivy reads, so it must not cross a network others share unencrypted.
 - The checker and Trivy run with this access: pin both (Trivy by digest too: its releases were hijacked in March
   2026, CVE-2026-33634), and run the checker as an unprivileged user.
 - Passwords in files (`*_FILE` variables, Docker secrets) instead of the environment are not in a container's

@@ -471,16 +471,23 @@ def test_cache_dir_is_passed(tmp_path: Path, docker: FakeDocker) -> None:
 def test_trivy_gets_only_the_listed_environment(tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch) -> None:
     containers(docker, "a:1")
     monkeypatch.setenv("SOME_SECRET", "hunter2")
-    monkeypatch.setenv("DOCKER_HOST", "tcp://proxy:2375")
+    monkeypatch.setenv("LISTED", "yes")
+    monkeypatch.setenv("DOCKER_HOST", "tcp://the-checkers-own:2375")
     script = tmp_path / "env_trivy.py"
     script.write_text(
         "import json, os, sys\nprint(json.dumps({'Results': []}))\n"
-        f"open({str(tmp_path / 'env.txt')!r}, 'w').write(','.join(sorted(k for k in os.environ if k in ('SOME_SECRET', 'DOCKER_HOST'))))\n",
+        f"open({str(tmp_path / 'env.txt')!r}, 'w').write(repr(sorted((k, v) for k, v in os.environ.items() if k in ('SOME_SECRET', 'LISTED', 'DOCKER_HOST'))))\n",
         encoding="utf-8",
     )
-    spec = build(tmp_path, docker, [sys.executable, str(script)], env=["DOCKER_HOST"])
+    spec = build(tmp_path, docker, [sys.executable, str(script)], env=["LISTED"])
     run(spec)
-    assert (tmp_path / "env.txt").read_text() == "DOCKER_HOST"
+    # DOCKER_HOST is the check's own 'docker' address, not the checker's environment
+    assert (tmp_path / "env.txt").read_text() == repr([("DOCKER_HOST", docker.url), ("LISTED", "yes")])
+
+
+def test_docker_host_in_env_is_refused(tmp_path: Path, docker: FakeDocker) -> None:
+    with pytest.raises(ConfigError, match="DOCKER_HOST comes from the check's 'docker' key"):
+        build(tmp_path, docker, [sys.executable, "-c", "pass"], env=["DOCKER_HOST"])
 
 
 def test_trivy_not_found_is_a_config_error(tmp_path: Path) -> None:

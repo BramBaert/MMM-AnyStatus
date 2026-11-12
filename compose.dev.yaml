@@ -67,7 +67,7 @@ services:
   # The real checker, running dev/checker.toml: the example checks (ping localhost, two sql_age checks on a SQLite file
   # that update_demo_db.py keeps fresh, a custom Python function) plus three mqtt checks against `mosquitto` and three
   # docker checks through `docker-socket-proxy` (image_vulns with Trivy from `trivy-bin`, which reads the local images
-  # through the proxy too: DOCKER_HOST; its database is kept in a volume, the first scan downloads it).
+  # through the proxy too, at the check's `docker` address; its database is kept in a volume, the first scan downloads it).
   # MagicMirror reaches it inside the compose network (http://checker:8099); its port is also published to this PC only
   # (127.0.0.1), for its own pages in a browser: http://localhost:8099/, /results and /vulns. The `demo` service also
   # listens on 8099 inside the network and stays unpublished: only one of them can have the PC's port. The examples
@@ -91,7 +91,6 @@ services:
       UV_PROJECT_ENVIRONMENT: /tmp/venv
       UV_CACHE_DIR: /tmp/uv-cache
       UV_LINK_MODE: copy
-      DOCKER_HOST: tcp://docker-socket-proxy:2375 # for Trivy: local images through the read-only proxy
       HOME: /tmp
     volumes:
       - ./checker:/checker:ro

@@ -209,6 +209,8 @@ class ImageVulns(Check):
         credentials: dict[str, str],
     ) -> None:
         self.client = DockerClient(endpoint)
+        # Trivy reads the local images from the same Docker as the check, so one checker can scan several hosts
+        self.docker_host = f"unix://{endpoint.unix_path}" if endpoint.unix_path else f"tcp://{endpoint.host}:{endpoint.port}"
         self.trivy = trivy
         self.cache_dir = cache_dir
         self.listed = schedule  # as written in the config
@@ -243,6 +245,8 @@ class ImageVulns(Check):
         cache_dir = table.opt_str("cache_dir")
         schedule = read_schedule(table)
         env_names = table.str_list("env") or []
+        if "DOCKER_HOST" in env_names:
+            table.error("'env': DOCKER_HOST comes from the check's 'docker' key: remove it from 'env'")
         if not table.has("timeout"):
             table.warning('image_vulns: the default timeout of 10 s is too short for Trivy: set timeout = "15m"')
         return cls(endpoint, trivy, cache_dir, schedule, env_names, registry_credentials(table))
@@ -267,7 +271,7 @@ class ImageVulns(Check):
     # the run
 
     def _environment(self) -> dict[str, str]:
-        """Only the listed variables that are set (for example HOME, DOCKER_HOST): nothing else, PATH included."""
+        """Only the listed variables that are set (for example HOME): nothing else, PATH included."""
         return {name: os.environ[name] for name in self.env_names if name in os.environ}
 
     def _target(self, image: RunningImage, left: float) -> str:
@@ -431,7 +435,7 @@ class ImageVulns(Check):
         command.append(image)
         env = self._environment()
         secrets = [v for v in env.values() if v]
-        done = run_process(command, env, timeout, MAX_OUTPUT, secrets)
+        done = run_process(command, {**env, "DOCKER_HOST": self.docker_host}, timeout, MAX_OUTPUT, secrets)
         if done.stderr:
             log.debug("image_vulns: trivy stderr: %s", done.stderr)
         if done.code != 0:

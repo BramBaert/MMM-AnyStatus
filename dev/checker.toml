@@ -129,7 +129,7 @@ timeout = "60s"
 show_after = { unknown = "2d" }   # a registry that is down for a day doesn't turn the card grey
 
 # image_vulns on the dev stack's own images, with the schedule of checker/README.md's example (explained there).
-# Trivy comes from the compose `trivy-bin` service; it reads local images through the proxy (DOCKER_HOST). The full
+# Trivy comes from the compose `trivy-bin` service; it reads local images through the proxy (the `docker` address). The full
 # list is at http://localhost:8099/vulns. The first run downloads Trivy's database (a few minutes).
 [[check]]
 id = "docker.vulns"
@@ -141,7 +141,7 @@ interval = "1d"
 timeout = "15m"
 trivy = "/trivy/trivy"
 cache_dir = "/trivy-cache"
-env = ["HOME", "DOCKER_HOST"]
+env = ["HOME"]
 show_after = { unknown = "3d" }
 
 [check.schedule.update]

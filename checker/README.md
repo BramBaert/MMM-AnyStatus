@@ -326,10 +326,11 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   run downloads the database; the default 10 s is too short, and the config warns about that): each scan gets the
   time that is left of the run, and a timeout kills Trivy. An image that couldn't be scanned is counted in the
   summary ("1 not scanned"); no image scanned at all is `unknown`. As for `exec`, only the environment variables
-  listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME", "DOCKER_HOST"]` (it reads local
-  images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375`, see below for what the proxy must
-  allow), and
-  for a private registry its own `TRIVY_USERNAME`/`TRIVY_PASSWORD` to scan a newer build there. The registry lookups
+  listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME"]`, and for a private registry its
+  own `TRIVY_USERNAME`/`TRIVY_PASSWORD` to scan a newer build there. Trivy reads the local images through the Docker
+  API: the checker sets its `DOCKER_HOST` to the check's own `docker` address (so one checker can scan several
+  hosts, one `image_vulns` check each; see below for what the proxy must allow). `DOCKER_HOST` in `env` is a config
+  error. The registry lookups
   use `registry_auth_env` as `docker_updates` does. The checker image doesn't contain Trivy. `warn`, `crit` and
   `worse` are a config error; `severities` is replaced by `schedule`.
 
@@ -361,7 +362,7 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   timeout = "15m"
   trivy = "/usr/local/bin/trivy"
   cache_dir = "/var/cache/trivy"
-  env = ["HOME", "DOCKER_HOST"]
+  env = ["HOME"]
   show_after = { unknown = "3d" }   # a Trivy or registry hiccup for a day or two doesn't turn the card grey
   registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }
 

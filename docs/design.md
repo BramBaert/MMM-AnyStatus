@@ -267,14 +267,6 @@ What was decided then is built and described above ("From the first real deploym
 
 Not planned yet; how they play out in practice decides their priority.
 
-- **Docker on more than one machine** (Bram, 2026-11-12). `docker_status` and `docker_updates` already take a Docker
-  address per check, so one checker can watch several hosts. `image_vulns` can't yet: Trivy gets `DOCKER_HOST`
-  from the checker's own environment (the `env` list), one value for every check, so a second `image_vulns` check
-  pointing at another host would make Trivy look for that host's images on the first one. Fix: give Trivy the
-  check's own `docker` address as `DOCKER_HOST`. The README should then say how to reach a remote host safely: a
-  socket proxy there, reachable only from the checker's machine (a firewall rule, or a VPN such as Tailscale with
-  an access rule), because reading through it shows every container's environment, passwords included.
-
 - **Seen and accepted, with an end date** (Bram, 2026-11-12): a list in the config, e.g. `accept = [{ cve = "CVE-…",
   image = "mariadb", until = "2027-01-31", why = "…" }]`. An accepted CVE doesn't count until its date, then it is
   back. It keeps the display calm without a blind spot, and the reason is written down. Trivy's `.trivyignore` has
