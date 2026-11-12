@@ -12,13 +12,18 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.11", "3.14"]
+    env:
+      # Every uv command uses the matrix Python; a --python flag on uv sync alone is undone by the next uv run,
+      # which follows .python-version and rebuilds the venv.
+      UV_PYTHON: ${{ matrix.python }}
     defaults:
       run:
         working-directory: checker
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --python ${{ matrix.python }}
+      - run: uv sync --all-extras  # the mqtt tests need paho-mqtt; mypy checks the database drivers' code too
+      - run: uv run python --version  # shows the Python the steps below really use
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy src

@@ -366,11 +366,11 @@ Secrets never sit in the file: a key ending in `_env` names an environment varia
 ## Development
 
 ```sh
-uv sync
+uv sync --all-extras               # the dev tools and every extra: the mqtt tests need paho-mqtt
 uv run pytest
 uv run ruff check && uv run ruff format --check
 uv run mypy src
-uv run --python 3.11 pytest        # the oldest supported Python
+uv run --python 3.11 --all-extras pytest   # the oldest supported Python (rebuilds .venv on 3.11)
 ```
 
 The real-database tests (`tests/test_real_databases.py`: `sql_age` and `sql_value` on MariaDB and PostgreSQL) are
