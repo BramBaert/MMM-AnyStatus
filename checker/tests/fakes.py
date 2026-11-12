@@ -351,7 +351,8 @@ class FakeRegistry(_Server):
 def write_fake_trivy(directory: Path, outputs: dict[str, Any], default: Any | None = None) -> list[str]:
     """A `trivy` stand-in: a Python script that prints the canned JSON for the image it is asked to scan (the last
     argument) and records its arguments. Returns the command as a list (`trivy = [...]`). `outputs` maps an image
-    name to a JSON value, to the string "fail" (exit 1), or to "hang" (sleeps)."""
+    name to a JSON value, to the string "fail" (exit 1), or to "hang" (sleeps). A scan straight from the registry
+    (`--image-src remote`) is looked up as "remote:<image>", and fails if there is no such key."""
     script = directory / "fake_trivy.py"
     data = directory / "fake_trivy.json"
     data.write_text(json.dumps({"outputs": outputs, "default": default}), encoding="utf-8")
@@ -361,7 +362,10 @@ def write_fake_trivy(directory: Path, outputs: dict[str, Any], default: Any | No
         f"with open({str(directory / 'calls.jsonl')!r}, 'a', encoding='utf-8') as f:\n"
         "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "image = sys.argv[-1]\n"
-        "out = cfg['outputs'].get(image, cfg['default'])\n"
+        "if 'remote' in sys.argv:\n"
+        "    out = cfg['outputs'].get('remote:' + image)\n"
+        "else:\n"
+        "    out = cfg['outputs'].get(image, cfg['default'])\n"
         "if out == 'fail':\n"
         "    sys.stderr.write('FATAL something went wrong\\n'); sys.exit(1)\n"
         "if out == 'hang':\n"
@@ -381,8 +385,8 @@ def trivy_calls(directory: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def trivy_json(vulns: list[tuple[str, str, str | None]]) -> dict[str, Any]:
-    """Trivy's JSON for (id, severity, fixed version or None) vulnerabilities."""
+def trivy_json(vulns: list[tuple[str, str, str | None]], layer: str = "") -> dict[str, Any]:
+    """Trivy's JSON for (id, severity, fixed version or None) vulnerabilities, all from the layer with this DiffID."""
     return {
         "SchemaVersion": 2,
         "Results": [
@@ -394,7 +398,9 @@ def trivy_json(vulns: list[tuple[str, str, str | None]]) -> dict[str, Any]:
                         "PkgName": f"pkg-{vuln_id[-4:]}",
                         "InstalledVersion": "1.0",
                         **({"FixedVersion": fixed} if fixed else {}),
+                        "Status": "fixed" if fixed else "affected",
                         "Severity": severity,
+                        **({"Layer": {"DiffID": layer}} if layer else {}),
                     }
                     for vuln_id, severity, fixed in vulns
                 ],

@@ -19,6 +19,7 @@ from typing import Any
 
 from anystatus.checks.docker_api import DockerClient, image_details, image_list
 from anystatus.checks.registry import ImageRef, RegistryClient, parse_image
+from anystatus.table import Table
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,25 @@ class ImageStore:
                 if item.get("RepoDigests") and any(t != "<none>:<none>" for t in item.get("RepoTags") or []):
                     self._candidates.append(self.inspect(str(item.get("Id", ""))))
         return self._candidates
+
+
+def registry_credentials(table: Table) -> dict[str, str]:
+    """`registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }`: registry host -> "user:password" from the environment."""
+    credentials: dict[str, str] = {}
+    for registry, variable in (table.str_map("registry_auth_env") or {}).items():
+        try:
+            host = parse_image(f"{registry}/x").registry
+        except ValueError:
+            table.error(f"'registry_auth_env': {registry!r} is not a registry host")
+            continue
+        secret = table.env_value(variable)
+        if secret is None:
+            continue
+        if ":" not in secret:
+            table.error(f"'registry_auth_env': {variable} must hold user:password")
+            continue
+        credentials[host] = secret
+    return credentials
 
 
 def rebuilt(registry: RegistryClient, ref: ImageRef, local: LocalImage) -> bool:

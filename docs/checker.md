@@ -159,7 +159,13 @@ The file uses WAL mode and is only ever touched by the one checker process.
 ## Serving
 
 - A small HTTP server in a thread answers `GET /results` from an in-memory snapshot that the scheduler replaces
-  after every run (SPEC: answering never runs checks). `GET /` is a plain-text or minimal HTML overview for humans.
+  after every run (SPEC: answering never runs checks). `GET /` is a plain-text overview for humans, which also
+  names the pages below.
+- **`GET /vulns`** (only when an `image_vulns` check is configured): an HTML page with the full list of each
+  `image_vulns` check's last run: level now, severity, image, CVE (linked to Trivy's page for it), package,
+  installed and fixed version, class, first found. What is due comes first. A display can't be clicked, so this is
+  where "1 critical, fixed, please update image" is explained. Rendered from what the last run left; "No run yet."
+  before the first.
 - The document's `source` is `[checker] name`; `results` in config order.
 - Anything else: 404. No other methods until push (`POST /results`) is designed.
 
@@ -212,7 +218,7 @@ the container itself.
 | `exec` | from the plugin's output | | none; the exit code is the level | the command | 4 |
 | `docker_status` | containers not fine | above | none; it decides its own level | Docker API access | 4 |
 | `docker_updates` | images with updates | above | warn 1, never `crit` | Docker API, registry access | 4 |
-| `image_vulns` | fixable CVEs | above | see below | Trivy | 4 |
+| `image_vulns` | CVEs that are due | | its `schedule` decides | Trivy | 4 |
 | `result_file` | as the file says | | | | 4 |
 | `mqtt` | age of the last message, a value from it, or a level it names | above | none | `mqtt` extra, a broker | 4 |
 | `system` | temperature, load, memory used | above | none | Linux | 4 |
@@ -479,16 +485,59 @@ group = "docker"
 interval = "1d"
 timeout = "15m"             # the first run downloads Trivy's database
 trivy = "trivy"             # the command, or a path
+
+[check.schedule.update]     # per class and severity: when a CVE turns the card amber and red (the README explains each line)
+CRITICAL = { warn = "0d", crit = "3d" }
+[check.schedule.no_fix]
+CRITICAL = { warn = "never", crit = "0d" }
 ```
 
-Runs `trivy image --format json --ignore-unfixed --quiet --scanners vuln` for each running container's image and counts **only CVEs that
-have a fix**. A base image always carries "will not fix" CVEs, so counting those would make the check amber forever.
+Runs `trivy image --format json --quiet --scanners vuln <image>` **once for each image of the running containers**,
+without `--ignore-unfixed`: every vulnerability is seen, and what the user can do about it decides what it means.
 
-- A fixable `CRITICAL` CVE makes it `crit`, a fixable `HIGH` one `warn` (`severities` changes which count).
-- The value is the number of fixable CVEs. The summary names the worst image ("grafana: 2 critical, fixed in
-  11.3.1").
-- Trivy not being installed is a config error at startup.
-- Trivy's cache (`--cache-dir`) should be on a volume, so the database isn't downloaded every day.
+**Classes**, per vulnerability (CVE and package) in an image:
+
+| Class | When | Card text |
+|---|---|---|
+| `update` | the image was pulled, its tag has a newer build in the registry, and that build doesn't have it | "mariadb: 1 critical, fixed, please update image" |
+| `rebuild` | the image is built locally, and either its base's tag has a newer build without it, or the package didn't come with the base (Trivy's `Layer.DiffID` is not one of the base's layers: your own Dockerfile installed it), or the base can't be found | "myapp: 2 critical, fixed, please rebuild image" |
+| `waiting` | a fixed version exists, but the newer build still has it, or there is no newer build (also: an image started by id or pinned by digest, and a registry that didn't answer) | "mariadb: 1 critical, waiting for upstream fix" |
+| `no_fix` | Trivy gives no fixed version (`Status` affected, will_not_fix, fix_deferred, end_of_life) | "mariadb: 1 critical, no fix exists" |
+
+"Upstream" was weighed against plain "waiting for fix": for those in the know it says more. The image's name comes
+first, so the text doesn't repeat it. Pulled or built locally, and the base of a built image, are found as
+`docker_updates` finds them.
+
+**Scans:** still one per image. An extra scan only for a tag that has a newer build: the image's own tag (pulled)
+or its base's (built locally, and only when a fixable CVE came with the base), straight from the registry
+(`trivy image --image-src remote <tag>`), each tag at most once per run. Whether a tag has a newer build is one
+manifest `HEAD`, as in `docker_updates` (with its `registry_auth_env`). No second check scans everything again, and
+no CVE is reported twice.
+
+**The schedule** (`[check.schedule.<class>]`, `SEVERITY = { warn = "...", crit = "..." }`): per class and
+severity, a `warn` and a `crit` time with the rules of `show_after` (`s`, `m`, `h`, `d`, `"0d"`, `"never"`), per
+CVE instead of per card, counted from **when the CVE was first found in that image** (by the image reference the
+container uses, such as `mariadb:11.4`, so pulling a newer build doesn't reset it). So: ignore it (leave the
+severity out), amber after *x* and red after *y*, or straight to red after *z* (`warn = "never"`). Both times are
+written out: a missing one is a config error, because skipping a level should be visible to whoever reads the
+config. A class or severity left out doesn't count (the README's example says so). Without a `schedule`: a fixed
+`CRITICAL` is red and a fixed `HIGH` amber at once, in every class, and `no_fix` doesn't count, which is what the
+check did before classes existed.
+
+- **First found** is kept per image reference and CVE in the check's memory (`extra`, under the
+  [continuity rule](#memory-the-sqlite-file)). A new critical doesn't inherit the age of an old one. A CVE that is no
+  longer in a scanned image is forgotten; if it comes back, it is new. An image that couldn't be scanned keeps its
+  dates. The age goes on when a CVE changes class (it was found when it was found).
+- The card's level is the worst over all CVEs. Its summary names the worst: of the CVEs at that level, the highest
+  severity, then the image and class with the most such CVEs (ties: `update`, `rebuild`, `waiting`, `no_fix`).
+  Cards are narrow, so that is all it says, plus "; 1 not scanned (…)" when an image couldn't be scanned (a blind
+  spot). The value is the number of CVEs that are due (amber or red). Nothing due: "nothing due in 5 images".
+- **The full list** is on the checker's page [`/vulns`](#serving).
+- **Known to be exploited (CISA's KEV list):** Trivy's report doesn't say (checked on Trivy 0.76.2's JSON: no such
+  field; only descriptions mention exploits). Trivy's maintainers have open requests for it (discussions #10706,
+  #10840). Nothing is built on it.
+- Trivy not being installed is a config error at startup. Its cache (`--cache-dir`) should be on a volume, so the
+  database isn't downloaded every day.
 
 ### `python`
 

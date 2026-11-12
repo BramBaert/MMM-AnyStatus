@@ -1,9 +1,11 @@
-"""The HTTP side: GET /results (JSON) and GET / (plain text), answered from the snapshot. Answering never runs checks."""
+"""The HTTP side: GET /results (JSON) and GET / (plain text), answered from the snapshot, plus pages of the checker's
+own (GET /vulns: image_vulns' full list), rendered from what the last runs left. Answering never runs checks."""
 
 from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -11,8 +13,14 @@ from anystatus.document import Snapshot
 
 log = logging.getLogger("anystatus")
 
+#: path -> (what the overview says about it, a function that renders the HTML page)
+Pages = Mapping[str, tuple[str, Callable[[], bytes]]]
 
-def make_handler(snapshot: Snapshot) -> type[BaseHTTPRequestHandler]:
+
+def make_handler(snapshot: Snapshot, pages: Pages | None = None) -> type[BaseHTTPRequestHandler]:
+    own: dict[str, tuple[str, Callable[[], bytes]]] = dict(pages or {})
+    links = "".join(f"GET {path} for {about}.\n" for path, (about, _) in own.items()).encode("utf-8")
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "anystatus-checker"
 
@@ -21,7 +29,15 @@ def make_handler(snapshot: Snapshot) -> type[BaseHTTPRequestHandler]:
             if path == "/results":
                 self._send(200, "application/json", snapshot.json_bytes())
             elif path == "/":
-                self._send(200, "text/plain; charset=utf-8", snapshot.overview_bytes())
+                self._send(200, "text/plain; charset=utf-8", snapshot.overview_bytes() + links)
+            elif path in own:
+                try:
+                    body = own[path][1]()
+                except Exception as exc:  # a page must never take the server down
+                    log.error("http: %s failed: %s", path, type(exc).__name__)
+                    self._send(500, "text/plain; charset=utf-8", b"error\n")
+                    return
+                self._send(200, "text/html; charset=utf-8", body)
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found\n")
 
@@ -40,8 +56,8 @@ def make_handler(snapshot: Snapshot) -> type[BaseHTTPRequestHandler]:
 
 
 class ResultsServer:
-    def __init__(self, host: str, port: int, snapshot: Snapshot) -> None:
-        self.httpd = ThreadingHTTPServer((host, port), make_handler(snapshot))
+    def __init__(self, host: str, port: int, snapshot: Snapshot, pages: Pages | None = None) -> None:
+        self.httpd = ThreadingHTTPServer((host, port), make_handler(snapshot, pages))
         self.httpd.daemon_threads = True
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="http", daemon=True)
 

@@ -13,10 +13,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from anystatus import __version__
+from anystatus.checks.image_vulns import render_vulns_page
 from anystatus.config import Config, load_config
 from anystatus.document import Snapshot
 from anystatus.scheduler import Scheduler, SystemClock, ThreadLauncher
-from anystatus.server import ResultsServer
+from anystatus.server import Pages, ResultsServer
 from anystatus.store import Store
 from anystatus.table import ConfigError
 
@@ -85,6 +86,14 @@ def run_once(config: Config, ids: Sequence[str] | None) -> int:
     return 0
 
 
+def pages(config: Config) -> Pages:
+    """The checker's own pages next to /results: /vulns when an image_vulns check is configured."""
+    vulns = [s for s in config.checks if s.type == "image_vulns"]
+    if not vulns:
+        return {}
+    return {"/vulns": ("the full list of vulnerabilities (image_vulns)", lambda: render_vulns_page(config.name, vulns))}
+
+
 def run_service(config: Config) -> int:
     try:
         store = Store(config.state)
@@ -93,7 +102,7 @@ def run_service(config: Config) -> int:
         return 2
     snapshot = Snapshot(config.name)
     try:
-        server = ResultsServer(config.listen[0], config.listen[1], snapshot)
+        server = ResultsServer(config.listen[0], config.listen[1], snapshot, pages(config))
     except OSError as exc:
         print(f"cannot listen on {config.listen[0]}:{config.listen[1]}: {exc.strerror or exc}", file=sys.stderr)
         return 2

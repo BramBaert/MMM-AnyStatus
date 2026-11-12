@@ -288,21 +288,44 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   **`user:password`** (for ghcr.io a personal access token as the password). It is sent only to that registry's own
   token service (or Docker Hub's), never to another host a registry names. The usual interval is a day.
 
-  **`image_vulns`**: runs [Trivy](https://trivy.dev) (`trivy image --format json --ignore-unfixed --quiet --scanners
-  vuln <image>`, a list, no shell) for each distinct image and counts **only vulnerabilities that have a fix**. A
-  fixable `CRITICAL` is `crit`, any other counted severity (`HIGH` by default) is `warn`; `severities = ["CRITICAL",
-  "HIGH", "MEDIUM"]` changes which severities count at all. The value is the number of fixable CVEs, the summary
-  names the worst image ("grafana: 2 critical, 1 high, fixed in 11.3.1"; "fixed in" appears when one version fixes
-  the worst ones). `trivy = "trivy"` is the command, a path, or a list such as `["docker", "run", "--rm", ...]`; **if it
-  can't be found the config is invalid** (and a Trivy that vanishes later makes the check `unknown`). `cache_dir`
-  is Trivy's `--cache-dir`: keep it on a volume so the database isn't downloaded every day. **`timeout = "15m"`**
-  (the first run downloads the database; the default 10 s is too short, and the config warns about that): each
-  image's scan gets the time that is left of the run, and a timeout kills Trivy. An image that couldn't be scanned
-  is counted in the summary ("1 not scanned"); no image scanned at all is `unknown`. As for `exec`, only the
-  environment variables listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME",
-  "DOCKER_HOST"]` (it reads local images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375`
-  with `IMAGES=1` on the proxy; otherwise it pulls from the registry). The checker image doesn't contain Trivy.
-  `warn`, `crit` and `worse` are a config error.
+  **`image_vulns`**: runs [Trivy](https://trivy.dev) (`trivy image --format json --quiet --scanners vuln <image>`, a
+  list, no shell) once for each distinct image of the running containers, and sorts every vulnerability it finds
+  into a **class**, by what you can do about it:
+
+  | Class | Meaning | The card says |
+  |---|---|---|
+  | `update` | a newer build of the image's own tag has the fix: pull it | "mariadb: 1 critical, fixed, please update image" |
+  | `rebuild` | your locally built image: its base has a newer build with the fix, or the package came with your own layers | "myapp: 2 critical, fixed, please rebuild image" |
+  | `waiting` | a fixed version exists, but no build of your tag (or your base's) has it yet | "mariadb: 1 critical, waiting for upstream fix" |
+  | `no_fix` | no fixed version exists | "mariadb: 1 critical, no fix exists" |
+
+  `update` versus `waiting` needs the newer build: only an image whose tag (or, for an image built locally, whose
+  base's tag; see `docker_updates` for how the base is found) has a newer build in the registry gets a second scan,
+  of that build straight from the registry (`--image-src remote`). Whether a package came with the base is Trivy's
+  layer of it. A registry that doesn't answer leaves those fixes `waiting` (the page says so).
+
+  **When it shows: a `schedule`** per class and severity, with a `warn` and a `crit` time like
+  [`show_after`](#show_after-how-long-a-level-must-last-before-it-shows)'s, **counted per CVE and image from when it
+  was first found** (kept in the memory file: a new critical doesn't inherit the age of an old one; a CVE that goes
+  away and comes back is new). The card's level is the worst over all CVEs. Write both times out (`"never"` skips
+  a colour); **a severity a class leaves out doesn't count**. Without a `schedule`, a fixed `CRITICAL` is red and a
+  fixed `HIGH` amber at once, whatever the class, and what has no fix doesn't count. The card names the image,
+  count, severity and class of the worst; the value is the number of CVEs that are due. **The full list** (level,
+  severity, image, CVE, package, installed and fixed version, class, first found) is on the checker's own page
+  **`/vulns`**, next to `/results`, since a display can't be clicked. Trivy's report doesn't say whether a CVE is
+  known to be exploited (CISA's KEV list), so neither does the checker.
+
+  `trivy = "trivy"` is the command, a path, or a list such as `["docker", "run", "--rm", ...]`; **if it can't be
+  found the config is invalid** (and a Trivy that vanishes later makes the check `unknown`). `cache_dir` is Trivy's
+  `--cache-dir`: keep it on a volume so the database isn't downloaded every day. **`timeout = "15m"`** (the first
+  run downloads the database; the default 10 s is too short, and the config warns about that): each scan gets the
+  time that is left of the run, and a timeout kills Trivy. An image that couldn't be scanned is counted in the
+  summary ("1 not scanned"); no image scanned at all is `unknown`. As for `exec`, only the environment variables
+  listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME", "DOCKER_HOST"]` (it reads local
+  images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375` with `IMAGES=1` on the proxy), and
+  for a private registry its own `TRIVY_USERNAME`/`TRIVY_PASSWORD` to scan a newer build there. The registry lookups
+  use `registry_auth_env` as `docker_updates` does. The checker image doesn't contain Trivy. `warn`, `crit` and
+  `worse` are a config error; `severities` is replaced by `schedule`.
 
   ```toml
   [[check]]
@@ -333,6 +356,32 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   trivy = "/usr/local/bin/trivy"
   cache_dir = "/var/cache/trivy"
   env = ["HOME", "DOCKER_HOST"]
+  show_after = { unknown = "3d" }   # a Trivy or registry hiccup for a day or two doesn't turn the card grey
+  registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }
+
+  # Each line: when a CVE of that class and severity turns the card amber (warn) and red (crit), counted from the
+  # day it was first found in that image. "0d" = at once, "never" = not that colour. A severity that a class leaves
+  # out doesn't count at all (it is still listed on /vulns). Red is for "act now"; amber for "this weekend".
+
+  [check.schedule.update]      # a newer build of your image's tag has the fix: pull it and restart the container
+  CRITICAL = { warn = "0d",  crit = "3d" }      # the fix is one pull away: amber today, red if it's still there in 3 days
+  HIGH     = { warn = "7d",  crit = "30d" }     # part of the weekly updates; red only if they were forgotten for a month
+  MEDIUM   = { warn = "30d", crit = "never" }   # comes along with any update; a reminder if none happened in a month
+
+  [check.schedule.rebuild]     # your own image: its base has a newer build with the fix, or a package you install has one
+  CRITICAL = { warn = "0d",  crit = "7d" }      # a rebuild takes more than a pull: a week before it turns red
+  HIGH     = { warn = "14d", crit = "never" }   # rebuild when it suits you; amber after two weeks as a reminder
+  MEDIUM   = { warn = "60d", crit = "never" }   # the next rebuild fixes it; a nudge if there was none in two months
+
+  [check.schedule.waiting]     # fixed by its makers, but not in any build of your tag (or base) yet: nothing to do but know
+  CRITICAL = { warn = "0d",  crit = "never" }   # worth knowing at once (does it need to be reachable meanwhile?), but red is for action
+  HIGH     = { warn = "0d",  crit = "never" }   # the same for HIGH. Expect this to keep the card amber often: base images
+                                                # usually carry a few HIGHs whose fix their makers haven't shipped yet
+  # MEDIUM left out: waiting for upstream on a medium is normal
+
+  [check.schedule.no_fix]      # no fix exists anywhere
+  CRITICAL = { warn = "never", crit = "0d" }    # red at once: a critical hole nobody can patch may need you (firewall it, take it offline)
+  # HIGH and MEDIUM left out: every base image carries unfixed ones; counting them would keep the card amber forever
   ```
 
 ### Read-only access to Docker

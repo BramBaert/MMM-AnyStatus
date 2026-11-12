@@ -34,7 +34,7 @@ from anystatus.checks.docker_api import (
     image_info,
     running_images,
 )
-from anystatus.checks.images import ImageStore, rebuilt
+from anystatus.checks.images import ImageStore, rebuilt, registry_credentials
 from anystatus.checks.registry import (
     ImageRef,
     RegistryClient,
@@ -122,22 +122,7 @@ class DockerUpdates(Check):
         endpoint = docker_endpoint(table)
         versions = table.choice("versions", ("minor", "major", "none"), "minor")
         ignore = table.str_list("ignore") or []
-        credentials: dict[str, str] = {}
-        given = table.str_map("registry_auth_env")
-        for registry, variable in (given or {}).items():
-            try:
-                host = parse_image(f"{registry}/x").registry
-            except ValueError:
-                table.error(f"'registry_auth_env': {registry!r} is not a registry host")
-                continue
-            secret = table.env_value(variable)
-            if secret is None:
-                continue
-            if ":" not in secret:
-                table.error(f"'registry_auth_env': {variable} must hold user:password")
-                continue
-            credentials[host] = secret
-        return cls(endpoint, versions, ignore, credentials)
+        return cls(endpoint, versions, ignore, registry_credentials(table))
 
     def _ignored(self, running: RunningImage, ref: ImageRef | None) -> bool:
         names = {running.reference.lower()}

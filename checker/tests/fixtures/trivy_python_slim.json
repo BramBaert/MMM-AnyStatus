@@ -1,0 +1,173 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.76.2"
+  },
+  "ArtifactName": "anystatus-localtest:dev",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "DiffIDs": [
+      "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+      "sha256:8fc845bed180f897442794f074a6fc079b1a8bde4881bd39fb19139de69559f1",
+      "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd",
+      "sha256:cf0d544b5f33c53badefbd79aa92e97c64efde6a5d63631aa3dd57eb1da12495",
+      "sha256:df90d133f4027bce634ccf83bd436005c9a641732c469989b3b431ec3e7c9035"
+    ],
+    "RepoTags": [
+      "anystatus-localtest:dev"
+    ]
+  },
+  "Results": [
+    {
+      "Target": "anystatus-localtest:dev (debian 13.7)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2011-3374",
+          "PkgName": "apt",
+          "InstalledVersion": "3.0.4",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2011-3374",
+          "Severity": "LOW"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-76642",
+          "PkgName": "bsdutils",
+          "InstalledVersion": "1:2.41.5-0+deb13u1",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-76642",
+          "Severity": "HIGH"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-3184",
+          "PkgName": "bsdutils",
+          "InstalledVersion": "1:2.41.5-0+deb13u1",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-3184",
+          "Severity": "MEDIUM"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-100290",
+          "PkgName": "libc-bin",
+          "InstalledVersion": "2.41-12+deb13u4",
+          "Status": "affected",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-100290",
+          "Severity": "UNKNOWN"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-9538",
+          "PkgName": "perl-base",
+          "InstalledVersion": "5.40.1-6+deb13u1",
+          "Status": "fix_deferred",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-9538",
+          "Severity": "HIGH"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-15534",
+          "PkgName": "perl-base",
+          "InstalledVersion": "5.40.1-6+deb13u1",
+          "Status": "fix_deferred",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-15534",
+          "Severity": "MEDIUM"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-76844",
+          "PkgName": "zlib1g",
+          "InstalledVersion": "1:1.3.dfsg+really1.3.1-1+b1",
+          "FixedVersion": "1:1.3.dfsg+really1.3.1-1+deb13u1",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-76844",
+          "Severity": "HIGH"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-27171",
+          "PkgName": "zlib1g",
+          "InstalledVersion": "1:1.3.dfsg+really1.3.1-1+b1",
+          "FixedVersion": "1:1.3.dfsg+really1.3.1-1+deb13u1",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41",
+            "DiffID": "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-27171",
+          "Severity": "MEDIUM"
+        }
+      ]
+    },
+    {
+      "Target": "Python",
+      "Class": "lang-pkgs",
+      "Type": "python-pkg",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-114613",
+          "PkgName": "msgpack",
+          "InstalledVersion": "1.1.2",
+          "FixedVersion": "1.2.3",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:0e665593ff40197b851364fab0389fc6f5fa35bc74814ddfad07f96f417fc574",
+            "DiffID": "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-114613",
+          "Severity": "HIGH"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-59890",
+          "PkgName": "setuptools",
+          "InstalledVersion": "70.3.0",
+          "FixedVersion": "83.0.0",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:0e665593ff40197b851364fab0389fc6f5fa35bc74814ddfad07f96f417fc574",
+            "DiffID": "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd"
+          },
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-59890",
+          "Severity": "MEDIUM"
+        },
+        {
+          "VulnerabilityID": "GHSA-xmj3-9gf7-h52w",
+          "PkgName": "setuptools",
+          "InstalledVersion": "70.3.0",
+          "FixedVersion": "84.1.0",
+          "Status": "fixed",
+          "Layer": {
+            "Digest": "sha256:0e665593ff40197b851364fab0389fc6f5fa35bc74814ddfad07f96f417fc574",
+            "DiffID": "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd"
+          },
+          "PrimaryURL": "https://github.com/advisories/GHSA-xmj3-9gf7-h52w",
+          "Severity": "LOW"
+        }
+      ]
+    }
+  ]
+}
