@@ -308,11 +308,15 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   [`show_after`](#show_after-how-long-a-level-must-last-before-it-shows)'s, **counted per CVE and image from when it
   was first found** (kept in the memory file: a new critical doesn't inherit the age of an old one; a CVE that goes
   away and comes back is new). The card's level is the worst over all CVEs. Write both times out (`"never"` skips
-  a colour); **a severity a class leaves out doesn't count**. Without a `schedule`, a fixed `CRITICAL` is red and a
+  a colour). **A severity a class doesn't list follows the nearest listed one below it** (LOW < MEDIUM < HIGH <
+  CRITICAL): a class that lists only MEDIUM counts HIGH and CRITICAL on MEDIUM's line. Below the lowest listed one, a
+  severity doesn't count; to not count a *higher* one, list it as `{ warn = "never", crit = "never" }`. UNKNOWN (not
+  rated by Trivy) counts only when it is listed itself, and passes nothing on. Without a `schedule`, a fixed `CRITICAL` is red and a
   fixed `HIGH` amber at once, whatever the class, and what has no fix doesn't count. The card names the image,
   count, severity and class of the worst; the value is the number of CVEs that are due. **The full list** (level,
   severity, image, CVE, package, installed and fixed version, class, first found) is on the checker's own page
-  **`/vulns`**, next to `/results`, since a display can't be clicked. Trivy's report doesn't say whether a CVE is
+  **`/vulns`**, next to `/results`, since a display can't be clicked, together with each class's schedule as it
+  applies (inherited lines marked "as MEDIUM: …"). Trivy's report doesn't say whether a CVE is
   known to be exploited (CISA's KEV list), so neither does the checker.
 
   `trivy = "trivy"` is the command, a path, or a list such as `["docker", "run", "--rm", ...]`; **if it can't be
@@ -360,8 +364,10 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }
 
   # Each line: when a CVE of that class and severity turns the card amber (warn) and red (crit), counted from the
-  # day it was first found in that image. "0d" = at once, "never" = not that colour. A severity that a class leaves
-  # out doesn't count at all (it is still listed on /vulns). Red is for "act now"; amber for "this weekend".
+  # day it was first found in that image. "0d" = at once, "never" = not that colour. A severity a class doesn't list
+  # follows the nearest listed one below it (LOW < MEDIUM < HIGH < CRITICAL); below the lowest listed one it doesn't
+  # count (it is still listed on /vulns), and neither does UNKNOWN unless listed. Red is for "act now"; amber for
+  # "this weekend".
 
   [check.schedule.update]      # a newer build of your image's tag has the fix: pull it and restart the container
   CRITICAL = { warn = "0d",  crit = "3d" }      # the fix is one pull away: amber today, red if it's still there in 3 days
@@ -377,11 +383,12 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   CRITICAL = { warn = "0d",  crit = "never" }   # worth knowing at once (does it need to be reachable meanwhile?), but red is for action
   HIGH     = { warn = "0d",  crit = "never" }   # the same for HIGH. Expect this to keep the card amber often: base images
                                                 # usually carry a few HIGHs whose fix their makers haven't shipped yet
-  # MEDIUM left out: waiting for upstream on a medium is normal
+  # MEDIUM and LOW left out, below HIGH: not counted. Waiting for upstream on a medium is normal
 
   [check.schedule.no_fix]      # no fix exists anywhere
   CRITICAL = { warn = "never", crit = "0d" }    # red at once: a critical hole nobody can patch may need you (firewall it, take it offline)
-  # HIGH and MEDIUM left out: every base image carries unfixed ones; counting them would keep the card amber forever
+  # HIGH and MEDIUM left out, below CRITICAL: not counted. Every base image carries unfixed ones; counting them would
+  # keep the card amber forever
   ```
 
 ### Read-only access to Docker

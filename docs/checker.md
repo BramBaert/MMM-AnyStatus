@@ -163,11 +163,12 @@ The file uses WAL mode and is only ever touched by the one checker process.
 - A small HTTP server in a thread answers `GET /results` from an in-memory snapshot that the scheduler replaces
   after every run (SPEC: answering never runs checks). `GET /` is a plain-text overview for humans, which also
   names the pages below.
-- **`GET /vulns`** (only when an `image_vulns` check is configured): an HTML page with the full list of each
-  `image_vulns` check's last run: level now, severity, image, CVE (linked to Trivy's page for it), package,
-  installed and fixed version, class, first found. What is due comes first. A display can't be clicked, so this is
-  where "1 critical, fixed, please update image" is explained. Rendered from what the last run left; "No run yet."
-  before the first.
+- **`GET /vulns`** (only when an `image_vulns` check is configured): an HTML page, per `image_vulns` check, with
+  its schedule as it applies (per class and severity; inherited lines marked "as MEDIUM: …", lines that don't count
+  as such) and the full list of its last run: level now, severity, image, CVE (linked to Trivy's page for it),
+  package, installed and fixed version, class, first found. What is due comes first. A display can't be clicked, so
+  this is where "1 critical, fixed, please update image" is explained. Rendered from what the last run left; "No run
+  yet." before the first.
 - The document's `source` is `[checker] name`; `results` in config order.
 - Anything else: 404. No other methods until push (`POST /results`) is designed.
 
@@ -519,12 +520,20 @@ no CVE is reported twice.
 **The schedule** (`[check.schedule.<class>]`, `SEVERITY = { warn = "...", crit = "..." }`): per class and
 severity, a `warn` and a `crit` time with the rules of `show_after` (`s`, `m`, `h`, `d`, `"0d"`, `"never"`), per
 CVE instead of per card, counted from **when the CVE was first found in that image** (by the image reference the
-container uses, such as `mariadb:11.4`, so pulling a newer build doesn't reset it). So: ignore it (leave the
-severity out), amber after *x* and red after *y*, or straight to red after *z* (`warn = "never"`). Both times are
-written out: a missing one is a config error, because skipping a level should be visible to whoever reads the
-config. A class or severity left out doesn't count (the README's example says so). Without a `schedule`: a fixed
-`CRITICAL` is red and a fixed `HIGH` amber at once, in every class, and `no_fix` doesn't count, which is what the
-check did before classes existed.
+container uses, such as `mariadb:11.4`, so pulling a newer build doesn't reset it). So: amber after *x* and red
+after *y*, straight to red after *z* (`warn = "never"`), or not at all (`{ warn = "never", crit = "never" }`). Both
+times are written out: a missing one is a config error, because skipping a level should be visible to whoever reads
+the config.
+
+**A severity a class doesn't list** follows the nearest listed severity *below* it, on the ladder LOW < MEDIUM <
+HIGH < CRITICAL: a class that lists only MEDIUM counts HIGH and CRITICAL on MEDIUM's line, because a class that
+cares about MEDIUM must not silently ignore worse. A severity below the lowest listed one doesn't count (LOW, in that
+class). To not count a higher severity, list it with `{ warn = "never", crit = "never" }`. Trivy's UNKNOWN (not
+rated) stands outside the ladder: it counts only when it is listed itself, and its line is never passed on. A class
+with nothing listed counts nothing. The `/vulns` page shows each class's schedule as it applies, inherited lines
+marked ("as MEDIUM: …"), so the rule is never hidden. Without a `schedule`: a fixed `CRITICAL` is red and a fixed
+`HIGH` amber at once, in every class, and `no_fix` doesn't count, which is what the check did before classes
+existed.
 
 - **First found** is kept per image reference and CVE in the check's memory (`extra`, under the
   [continuity rule](#memory-the-sqlite-file)). A new critical doesn't inherit the age of an old one. A CVE that is no

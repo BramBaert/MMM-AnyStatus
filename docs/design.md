@@ -160,9 +160,16 @@ How each works in detail: [checker.md](checker.md).
   - **A CVE in a locally built image's own layers** (a package its Dockerfile installs) is *rebuild* (agreed, Bram,
     2026-11-12): a fixed version exists and it is in the user's hands. Rebuilding helps when the Dockerfile installs
     the newest version; if it pins one, the fix is a change to the Dockerfile.
-  - **Skipping a level is written out, not left out**, for the human reading the config: `warn = "never"`.
-    Leaving a severity out of a class means "don't care", and the example config says so. The README has an
-    example that explains the use case of each line.
+  - **Skipping a level is written out, not left out**, for the human reading the config: `warn = "never"`. The
+    README has an example that explains the use case of each line.
+  - **A higher severity left out of a class inherits** (decided, Bram, 2026-11-12; built). At first a severity left
+    out of a class was ignored; Bram expected the opposite: a class that lists MEDIUM must not silently ignore HIGH
+    and CRITICAL. Now a missing severity takes the schedule of the nearest listed one *below* it; a missing one
+    below the lowest listed stays "don't care". `"never"` is how a user says "really don't care" about a higher one
+    (`CRITICAL = { warn = "never", crit = "never" }`). The ladder is LOW < MEDIUM < HIGH < CRITICAL; Trivy's UNKNOWN
+    (not rated) stands outside it: it counts only when listed itself, and never passes its schedule on. The `/vulns`
+    page shows each class's schedule as it applies, inherited lines marked ("HIGH: as MEDIUM"), so the rule isn't
+    hidden. (Also weighed: a config error when a higher severity is missing. Fully explicit, but more lines.)
   - **What it costs:** Trivy only says whether a fixed version exists, so *update* versus *waiting* means scanning
     the newer build of the tag too (straight from the registry), and *rebuild* the newer base. That is extra scans
     only for images that have a newer build or base; still one scan per image otherwise, and no CVE reported twice.
@@ -239,6 +246,17 @@ What was decided then is built and described above ("From the first real deploym
 
 - **Escalation by age:** "amber for longer than 60 days becomes red" (pending updates are never more than amber).
   `show_after` doesn't do that; it would be one more entry, e.g. `escalate = { crit = "60d" }`.
+- **The recommended Docker socket proxy is unmaintained.** `tecnativa/docker-socket-proxy:v0.5.0` (named in the
+  README, `checker.md` and `compose.dev.yaml`) and its `latest` were one old build with 9 HIGH/CRITICAL findings,
+  all fixed in Alpine but never rebuilt (Trivy 0.76.1, 2026-11-12); Bram: "damning" for a proxy this project
+  introduces. `linuxserver/socket-proxy` is a fork with the same settings (`CONTAINERS`, `IMAGES`, `POST`), rebuilt
+  about weekly, with none (tested 2026-11-12 with the same settings: `POST` and a section that isn't on answer `403`,
+  `GET /containers/json` `200`). Only exact tags (the HAProxy version, e.g. `3.4.7`), which linuxserver rebuilds
+  while current. `wollomatic/socket-proxy` (Go, signed images, a different config) had none either. To change: the
+  three places above.
+- **`docker_updates`: `versions = "patch"`.** A newer tag with the same major.minor (`3.4.7` → `3.4.8`,
+  `1.37.4` → `1.37.5`), not `11.4` → `11.8`. For setups that fix major.minor on purpose but have images that only
+  publish exact tags: `versions = "none"` misses those patches, `"minor"` flags every minor release.
 
 ## Future work
 

@@ -15,7 +15,7 @@ import pytest
 from fakes import FakeDocker, FakeRegistry, digest, fixture, trivy_calls, trivy_json, write_fake_trivy
 from helpers import START, FakeClock, parse
 
-from anystatus.checks.image_vulns import ImageVulns, parse_trivy, render_vulns_page
+from anystatus.checks.image_vulns import Applied, ImageVulns, apply_ladder, parse_trivy, render_vulns_page
 from anystatus.cli import pages
 from anystatus.document import Snapshot
 from anystatus.judge import judge
@@ -162,9 +162,9 @@ def test_update_or_waiting_depends_on_the_newer_build(tmp_path: Path, docker: Fa
     assert rows(spec) == [
         ("db", "CVE-2026-1003", "no_fix", "crit"),  # no fix exists: red at once (the user may have to act anyway)
         ("db", "CVE-2026-1001", "update", "warn"),
-        ("db", "CVE-2026-1002", "waiting", "ok"),  # waiting: CRITICAL is not in that class's schedule
+        ("db", "CVE-2026-1002", "waiting", "warn"),  # waiting lists only HIGH: CRITICAL follows HIGH's line
     ]
-    assert (core.level, core.summary, core.value) == ("crit", "db: 1 critical, no fix exists", 2)
+    assert (core.level, core.summary, core.value) == ("crit", "db: 1 critical, no fix exists", 3)
     local, remote = trivy_calls(tmp_path)
     assert "--ignore-unfixed" not in local and "--image-src" not in local
     assert remote[remote.index("--image-src") + 1] == "remote" and remote[-1] == db
@@ -279,15 +279,83 @@ def test_a_cve_that_goes_away_and_comes_back_is_new(tmp_path: Path, docker: Fake
     assert spec.check.report.findings[0].first_found == START + 5 * DAY
 
 
-def test_never_and_a_severity_that_is_not_listed(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+def test_a_higher_severity_follows_the_line_below_and_a_lower_one_is_ignored(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     db = pulled(docker, reg, "acme/db", "11", "db-1")
     reg.add("acme/db", "11", index=digest("db-1"))
     output = trivy_json([("CVE-2026-7001", "CRITICAL", "1.1"), ("CVE-2026-7002", "MEDIUM", "1.1")])
     spec = build(tmp_path, docker, write_fake_trivy(tmp_path, {db: output}), SCHEDULE)
     _, core = run(at(spec, START + 100 * DAY))
-    # waiting lists only HIGH: a waiting CRITICAL and MEDIUM don't count, however old
-    assert (core.level, core.summary, core.value) == ("ok", "nothing due in 1 image", 0)
-    assert [f.scheduled for f in spec.check.report.findings] == [False, False]
+    # waiting lists only HIGH: a waiting CRITICAL follows HIGH's line (amber, never red); MEDIUM is below it: ignored
+    assert (core.level, core.summary, core.value) == ("warn", "db: 1 critical, waiting for upstream fix", 1)
+    assert [(f.vuln.severity, f.scheduled) for f in spec.check.report.findings] == [("CRITICAL", True), ("MEDIUM", False)]
+
+
+# --- the ladder: a severity that isn't listed follows the nearest listed one below it
+
+
+def by_severity(spec: Any) -> dict[str, str]:
+    """severity -> level now, or "-" when its class and severity don't count."""
+    return {f.vuln.severity: f.level if f.scheduled else "-" for f in spec.check.report.findings}
+
+
+def waiting_only(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry, schedule: str) -> Any:
+    """A registry image without a newer build (every fix is `waiting`), one fixed CVE of each severity."""
+    db = pulled(docker, reg, "acme/db", "11", "db-1")
+    reg.add("acme/db", "11", index=digest("db-1"))
+    output = trivy_json([(f"CVE-2026-{i}000", severity, "2.0") for i, severity in enumerate(["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"], 1)])
+    return build(tmp_path, docker, write_fake_trivy(tmp_path, {db: output}), schedule)
+
+
+def test_a_class_with_only_medium_counts_high_and_critical_on_its_line(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    spec = waiting_only(tmp_path, docker, reg, '[check.schedule.waiting]\nMEDIUM = { warn = "0d", crit = "10d" }\n')
+    run(at(spec, START))
+    assert by_severity(spec) == {"CRITICAL": "warn", "HIGH": "warn", "MEDIUM": "warn", "LOW": "-", "UNKNOWN": "-"}
+    _, core = run(at(spec, START + 10 * DAY))
+    assert by_severity(spec) == {"CRITICAL": "crit", "HIGH": "crit", "MEDIUM": "crit", "LOW": "-", "UNKNOWN": "-"}
+    assert (core.level, core.summary, core.value) == ("crit", "db: 1 critical, waiting for upstream fix", 3)
+
+
+def test_a_listed_never_stays_ignored(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    schedule = '[check.schedule.waiting]\nMEDIUM = { warn = "0d", crit = "10d" }\nCRITICAL = { warn = "never", crit = "never" }\n'
+    spec = waiting_only(tmp_path, docker, reg, schedule)
+    run(at(spec, START))
+    _, core = run(at(spec, START + 100 * DAY))
+    assert by_severity(spec) == {"CRITICAL": "-", "HIGH": "crit", "MEDIUM": "crit", "LOW": "-", "UNKNOWN": "-"}
+    assert core.summary == "db: 1 high, waiting for upstream fix"
+
+
+def test_unknown_neither_inherits_nor_passes_on(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    spec = waiting_only(tmp_path, docker, reg, '[check.schedule.waiting]\nUNKNOWN = { warn = "0d", crit = "never" }\n')
+    _, core = run(spec)
+    assert by_severity(spec) == {"CRITICAL": "-", "HIGH": "-", "MEDIUM": "-", "LOW": "-", "UNKNOWN": "warn"}
+    assert core.summary == "db: 1 unknown, waiting for upstream fix"
+    # and with LOW listed (the bottom of the ladder), UNKNOWN still follows nothing
+    assert apply_ladder({"LOW": (0.0, 1.0)}) == {s: Applied((0.0, 1.0), "LOW") for s in ("LOW", "MEDIUM", "HIGH", "CRITICAL")}
+
+
+def test_a_class_with_nothing_listed_counts_nothing(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    schedule = '[check.schedule.waiting]\n[check.schedule.update]\nLOW = { warn = "0d", crit = "0d" }\n'
+    spec = waiting_only(tmp_path, docker, reg, schedule)
+    _, core = run(at(spec, START + 100 * DAY))
+    assert set(by_severity(spec).values()) == {"-"}
+    assert (core.level, core.value) == ("ok", 0)
+    assert apply_ladder({}) == {}
+
+
+def test_the_page_shows_the_schedule_as_it_applies(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    schedule = '[check.schedule.waiting]\nMEDIUM = { warn = "0d", crit = "10d" }\nCRITICAL = { warn = "never", crit = "never" }\n'
+    spec = waiting_only(tmp_path, docker, reg, schedule)
+    page = render_vulns_page("home", [spec]).decode("utf-8")  # before the first run too: it is the config
+    waiting = next(row for row in page.split("<tr>") if row.startswith("<td>waiting</td>"))
+    cells = [c.split("</td>")[0] for c in waiting.split("<td>")[2:]]
+    assert cells == [
+        "never (not counted)",
+        "as MEDIUM: amber at once, red 10d",
+        "amber at once, red 10d",
+        f"{chr(0x2013)} not counted",
+        f"{chr(0x2013)} not counted",
+    ]
+    assert "<th>critical</th><th>high</th><th>medium</th><th>low</th><th>unknown</th>" in page
 
 
 def test_without_a_schedule_it_counts_fixed_critical_and_high(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
@@ -538,9 +606,13 @@ def test_the_readme_example_is_valid(tmp_path: Path) -> None:
     config = parse(text, tmp_path, env={"GHCR_AUTH": "u:p"})
     check = next(s.check for s in config.checks if s.id == "docker.vulns")
     assert isinstance(check, ImageVulns)
-    assert check.schedule["update"] == {"CRITICAL": (0.0, 3 * 86400.0), "HIGH": (7 * 86400.0, 30 * 86400.0), "MEDIUM": (30 * 86400.0, float("inf"))}
+    assert check.listed["update"] == {"CRITICAL": (0.0, 3 * 86400.0), "HIGH": (7 * 86400.0, 30 * 86400.0), "MEDIUM": (30 * 86400.0, float("inf"))}
+    # what the example's comments say is left out really doesn't count: every left-out severity is below the lowest
+    # listed one, and UNKNOWN is listed nowhere
+    assert set(check.schedule["update"]) == set(check.schedule["rebuild"]) == {"CRITICAL", "HIGH", "MEDIUM"}
     assert set(check.schedule["waiting"]) == {"CRITICAL", "HIGH"}
-    assert check.schedule["no_fix"] == {"CRITICAL": (float("inf"), 0.0)}
+    assert check.schedule["no_fix"] == {"CRITICAL": Applied((float("inf"), 0.0), "CRITICAL")}
+    assert all(line.source == severity for lines in check.schedule.values() for severity, line in lines.items())  # nothing inherited
     assert config.warnings == ()
 
 

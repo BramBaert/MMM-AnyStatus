@@ -16,8 +16,10 @@ build in the registry (one manifest HEAD) gets a second scan, of that build stra
 (images.py finds the base).
 
 Per class and severity, the config's **schedule** gives a warn and a crit time, counted per CVE and image from when
-it was first found (kept in the memory file). A severity a class doesn't list doesn't count. The card's level is the
-worst over all CVEs; the full list goes on the checker's page `/vulns`.
+it was first found (kept in the memory file). A severity a class doesn't list takes the line of the nearest listed
+severity below it (LOW < MEDIUM < HIGH < CRITICAL); below the lowest listed one it doesn't count. UNKNOWN (not rated)
+is outside that ladder: it counts only when listed itself, and passes nothing on. The card's level is the worst over
+all CVEs; the full list, and the schedule as it applies, go on the checker's page `/vulns`.
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ from anystatus.errors import mask
 from anystatus.judge import lasted
 from anystatus.model import CheckFailure, Observation
 from anystatus.table import Table
-from anystatus.timeutil import format_time, parse_time, parse_wait
+from anystatus.timeutil import format_time, format_wait, parse_time, parse_wait
 
 if TYPE_CHECKING:
     from anystatus.config import CheckSpec
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("anystatus")
 
 SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN")
+LADDER = ("LOW", "MEDIUM", "HIGH", "CRITICAL")  # lowest first; UNKNOWN (Trivy: not rated) stands outside it
 CLASSES = ("update", "rebuild", "waiting", "no_fix")
 CLASS_NAMES = {"update": "update", "rebuild": "rebuild", "waiting": "waiting", "no_fix": "no fix"}
 CARD_TEXT = {
@@ -77,6 +80,38 @@ _LEVEL_RANK = {"ok": 0, "warn": 1, "crit": 2}
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+Times = tuple[float, float]  # (warn, crit) in seconds; inf is "never"
+
+
+@dataclass(frozen=True)
+class Applied:
+    """One severity's line in a class, as it applies: its own, or inherited from the nearest listed one below it."""
+
+    times: Times
+    source: str  # the severity whose line it is
+
+    @property
+    def counts(self) -> bool:
+        """False for `{ warn = "never", crit = "never" }`: "don't care", written out."""
+        return not all(t == float("inf") for t in self.times)
+
+
+def apply_ladder(listed: dict[str, Times]) -> dict[str, Applied]:
+    """A class's lines as written -> the line each severity follows. A severity that isn't listed takes the line of
+    the nearest listed one below it on LOW < MEDIUM < HIGH < CRITICAL; one below the lowest listed has none (doesn't
+    count). UNKNOWN only follows its own line, and never passes it on."""
+    applied: dict[str, Applied] = {}
+    below: str | None = None
+    for severity in LADDER:
+        if severity in listed:
+            below = severity
+        if below is not None:
+            applied[severity] = Applied(listed[below], below)
+    if "UNKNOWN" in listed:
+        applied["UNKNOWN"] = Applied(listed["UNKNOWN"], "UNKNOWN")
+    return applied
 
 
 @dataclass(frozen=True)
@@ -134,7 +169,7 @@ class Finding:
     klass: str
     first_found: datetime
     level: str  # "ok" (not due yet, or not in the schedule), "warn", "crit"
-    scheduled: bool  # the schedule lists this class and severity
+    scheduled: bool  # the schedule counts this class and severity (its own line or an inherited one, not never/never)
 
 
 @dataclass(frozen=True)
@@ -169,14 +204,15 @@ class ImageVulns(Check):
         endpoint: Endpoint,
         trivy: list[str],
         cache_dir: str | None,
-        schedule: dict[str, dict[str, tuple[float, float]]],
+        schedule: dict[str, dict[str, Times]],
         env_names: list[str],
         credentials: dict[str, str],
     ) -> None:
         self.client = DockerClient(endpoint)
         self.trivy = trivy
         self.cache_dir = cache_dir
-        self.schedule = schedule
+        self.listed = schedule  # as written in the config
+        self.schedule = {klass: apply_ladder(schedule.get(klass, {})) for klass in CLASSES}  # as it applies
         self.env_names = env_names
         self.credentials = credentials
         self.now: Callable[[], datetime] = _now
@@ -300,12 +336,13 @@ class ImageVulns(Check):
             for vuln in vulns:
                 klass = classes[vuln.key]
                 first = found[f"{reference}|{vuln.id}"]
-                times = self.schedule.get(klass, {}).get(vuln.severity)
+                line = self.schedule[klass].get(vuln.severity)
                 level = "ok"
-                if times is not None:
-                    warn, crit = times
+                if line is not None:
+                    warn, crit = line.times
                     level = "crit" if lasted(first, crit, now) else "warn" if lasted(first, warn, now) else "ok"
-                findings.append(Finding(_short(reference), reference, vuln, klass, first, level, times is not None))
+                counts = line is not None and line.counts
+                findings.append(Finding(_short(reference), reference, vuln, klass, first, level, counts))
 
         notes: list[str] = []
         if run.unchecked:
@@ -408,8 +445,9 @@ class ImageVulns(Check):
 
 
 def read_schedule(table: Table) -> dict[str, dict[str, tuple[float, float]]]:
-    """`[check.schedule.<class>]` tables of `SEVERITY = { warn = "...", crit = "..." }`. Both times are written out
-    ("never" skips a level); a severity a class doesn't list doesn't count. Without `schedule`: DEFAULT_SCHEDULE."""
+    """`[check.schedule.<class>]` tables of `SEVERITY = { warn = "...", crit = "..." }`, as written. Both times are
+    written out ("never" skips a level). Which line a severity that isn't listed follows: apply_ladder. Without
+    `schedule`: DEFAULT_SCHEDULE."""
     raw = table.raw("schedule")
     if raw is None:
         return DEFAULT_SCHEDULE
@@ -476,6 +514,37 @@ a { color: inherit; }
 """
 
 
+_PAGE_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN")
+
+
+def _schedule_cell(line: Applied | None, severity: str) -> str:
+    if line is None:
+        return f"{_DASH} not counted"
+    if not line.counts:
+        text = "never (not counted)"
+    else:
+        warn, crit = (("at once" if t == 0 else format_wait(t)) for t in line.times)
+        text = f"amber {warn}, red {crit}"
+    return text if line.source == severity else f"as {line.source}: {text}"
+
+
+def _schedule_table(check: ImageVulns) -> str:
+    """The schedule as it applies, per class and severity, inherited lines marked ("as MEDIUM: ..."), so the rule
+    that fills the gaps is never hidden. Times count from when a CVE was first found in an image."""
+    e = html.escape
+    rows = [
+        "<p>Schedule as it applies (from first found; a severity that isn't listed follows the nearest listed one "
+        "below it, UNKNOWN only its own line):</p>",
+        "<div class=scroll><table><tr><th>Class</th>" + "".join(f"<th>{s.lower()}</th>" for s in _PAGE_SEVERITIES) + "</tr>",
+    ]
+    for klass in CLASSES:
+        lines = check.schedule[klass]
+        cells = "".join(f"<td>{e(_schedule_cell(lines.get(s), s))}</td>" for s in _PAGE_SEVERITIES)
+        rows.append(f"<tr><td>{e(CLASS_NAMES[klass])}</td>{cells}</tr>")
+    rows.append("</table></div>")
+    return "".join(rows)
+
+
 def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
     """The full list per image_vulns check: image, CVE, package, installed and fixed version, class, first found."""
     e = html.escape
@@ -492,6 +561,7 @@ def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
             continue
         report = check.report
         parts.append(f"<h2>{e(spec.label)} <small>({e(spec.id)})</small></h2>")
+        parts.append(_schedule_table(check))
         if report is None:
             parts.append("<p>No run yet.</p>")
             continue
