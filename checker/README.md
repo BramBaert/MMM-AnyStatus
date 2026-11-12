@@ -270,7 +270,14 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   with the same shape (`1.27.3-alpine` → `1.27.4-alpine`; not `1.27.4`, not `1.27.4-perl`): `versions = "minor"`
   (default) allows the same major, `"major"` any, `"none"` only the digest. `latest` and other tags that aren't
   versions are checked by digest only. An image started by digest (`image@sha256:...`) is skipped on purpose (the
-  summary says "1 pinned by digest, skipped"), as is one built locally (no digest to compare). The value is the number
+  summary says "1 pinned by digest, skipped"). **An image built locally is checked through its base image**: Docker
+  doesn't record the base's name, but an image's layers start with its base's, so the base is the local registry
+  image whose layers are the longest prefix of its own. The summary then says "myapp (base python:3.14-slim rebuilt,
+  rebuild)" or "myapp (base python 3.14 → 3.15)". If the base is no longer in the image store (`docker image prune`),
+  it says "myapp: base image not found (pruned?)" and the image doesn't count. Whether an image was built locally
+  comes from Docker 29's `Identity` field; older engines don't have it, and there an image with a `RepoDigest` counts
+  as pulled, which is right for the classic image store but not for the containerd one (where a built image has a
+  RepoDigest too). The value is the number
   of images with an update, **`warn` at most** (`crit` is a config error; `warn = 2` makes it amber from two images);
   the summary names them: "3 images: nginx (rebuilt), grafana 11.2 → 11.3, …". `ignore = ["postgres",
   "ghcr.io/org/app:1"]` skips images (by name, repository, or name:tag). A registry that doesn't answer makes

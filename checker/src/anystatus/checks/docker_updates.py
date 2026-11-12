@@ -8,6 +8,9 @@ Per distinct image of a running container (see docs/checker.md):
 - *newer version*: the registry has a higher version tag of the same shape (same number of numeric parts, same
   `v` prefix and suffix, e.g. `-alpine`) - within the same major unless `versions = "major"`.
 
+An image built here is checked through its base image instead (found from the layers, see images.py): "myapp (base
+python:3.14-slim rebuilt, rebuild)". If its base is no longer in the image store, the summary says so.
+
 An image started by digest is skipped (pinned on purpose). The value is the number of images with an update, `warn` at
 most: `crit` is a config error. One registry failing makes that image unknown; the whole check is `unknown` only if no
 registry answered.
@@ -31,6 +34,7 @@ from anystatus.checks.docker_api import (
     image_info,
     running_images,
 )
+from anystatus.checks.images import ImageStore, rebuilt
 from anystatus.checks.registry import (
     ImageRef,
     RegistryClient,
@@ -83,9 +87,10 @@ def newest_version(running: str, tags: list[str], versions: str) -> str | None:
 @dataclass(frozen=True)
 class _Verdict:
     name: str
-    state: str  # "current", "rebuilt", "newer", "unknown", "skipped"
-    detail: str = ""  # for "newer": "11.2 -> 11.3"
+    state: str  # "current", "rebuilt", "newer", "unknown", "skipped", "no base"
+    detail: str = ""  # for "newer": "11.2 -> 11.3"; for "skipped": why
     truncated: bool = False
+    base: str = ""  # an image built here: its base (`python:3.14-slim`), which is what was checked
 
 
 @register
@@ -155,12 +160,14 @@ class DockerUpdates(Check):
 
         images = running_images(self.client, left())
         registry = RegistryClient(self.credentials, deadline)
+        store = ImageStore(self.client, left)
         verdicts: list[_Verdict] = []
         for image in images:
-            verdicts.append(self._check_image(image, registry, left))
+            verdicts.append(self._check_image(image, registry, store, left))
 
-        considered = [v for v in verdicts if v.state != "skipped"]
+        considered = [v for v in verdicts if v.state not in ("skipped", "no base")]
         pinned = sum(1 for v in verdicts if v.state == "skipped" and v.detail == "pinned")
+        no_base = [v for v in verdicts if v.state == "no base"]
         notes: list[str] = []
         updates = [v for v in considered if v.state in ("rebuilt", "newer")]
         unknown = [v for v in considered if v.state == "unknown"]
@@ -168,6 +175,8 @@ class DockerUpdates(Check):
             raise CheckFailure("no registry answered")
         if pinned:
             notes.append(f"{pinned} pinned by digest, skipped")
+        if no_base:
+            notes.append(f"{_names(no_base)}: base image not found (pruned?)")
         if unknown:
             notes.append(f"{len(unknown)} unknown (registry did not answer): {_names(unknown)}")
         if any(v.truncated for v in considered):
@@ -185,7 +194,7 @@ class DockerUpdates(Check):
             text += "; " + "; ".join(notes)
         return Reading(value=float(len(updates)), text=text, fields={"names": names})
 
-    def _check_image(self, image: RunningImage, registry: RegistryClient, left: Callable[[], float]) -> _Verdict:
+    def _check_image(self, image: RunningImage, registry: RegistryClient, store: ImageStore, left: Callable[[], float]) -> _Verdict:
         reference = image.reference
         try:
             if not reference:  # the container shows only an id: use a tag the image has
@@ -201,37 +210,27 @@ class DockerUpdates(Check):
             return _Verdict(label, "skipped", "pinned")
         if ref is None or self._ignored(image, ref):
             return _Verdict(label, "skipped", "ignored" if ref is not None else "untagged")
-        assert ref.tag is not None
         try:
-            _, repo_digests = image_info(self.client, image.image_id, left())
-            local = {
-                digest
-                for entry in repo_digests
-                if (own := _safe_parse(entry)) is not None
-                and (own.registry, own.repository) == (ref.registry, ref.repository)
-                and (digest := own.digest)
-            }
-            if not local:  # built or loaded here: there is no registry digest to compare with
-                return _Verdict(label, "skipped", "local")
-            current = registry.manifest_digest(ref)
-            rebuilt = current not in local
+            local = store.inspect(image.image_id)
+            base_name = ""
+            if not local.from_registry(ref):
+                # Built here (or tagged here from another image): its registry is the base's. See images.py.
+                base = store.find_base(local)
+                if base is None:
+                    return _Verdict(label, "no base")
+                ref, local, base_name = base.ref, base.image, base.name
+            assert ref.tag is not None
+            was_rebuilt = rebuilt(registry, ref, local)
             newer: str | None = None
             truncated = False
             if self.versions != "none" and parse_version_tag(ref.tag) is not None:
                 tags, truncated = registry.list_tags(ref)
                 newer = newest_version(ref.tag, tags, self.versions)
-        except (RegistryError, CheckFailure):
+        except (RegistryError, CheckFailure):  # NotFound (an image that went away) included
             return _Verdict(label, "unknown")
         if newer is not None:
-            return _Verdict(label, "newer", f"{_version_text(ref.tag)} → {_version_text(newer)}", truncated)
-        return _Verdict(label, "rebuilt" if rebuilt else "current", truncated=truncated)
-
-
-def _safe_parse(entry: str) -> ImageRef | None:
-    try:
-        return parse_image(entry)
-    except ValueError:
-        return None
+            return _Verdict(label, "newer", f"{_version_text(ref.tag)} → {_version_text(newer)}", truncated, base_name)
+        return _Verdict(label, "rebuilt" if was_rebuilt else "current", truncated=truncated, base=base_name)
 
 
 def _version_text(tag: str) -> str:
@@ -244,7 +243,11 @@ def _version_text(tag: str) -> str:
 def _names(verdicts: list[_Verdict]) -> str:
     shown = []
     for v in sorted(verdicts, key=lambda v: v.name)[:MAX_NAMES]:
-        if v.state == "newer":
+        if v.base and v.state == "newer":
+            shown.append(f"{v.name} (base {v.base.rsplit(':', 1)[0]} {v.detail})")
+        elif v.base and v.state == "rebuilt":
+            shown.append(f"{v.name} (base {v.base} rebuilt, rebuild)")
+        elif v.state == "newer":
             shown.append(f"{v.name} {v.detail}")
         elif v.state == "rebuilt":
             shown.append(f"{v.name} (rebuilt)")

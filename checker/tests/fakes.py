@@ -73,7 +73,10 @@ class _DockerHandler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         query = parse_qs(parts.query)
         segments = parts.path.strip("/").split("/")
-        if parts.path == "/containers/json":
+        if parts.path == "/images/json":
+            listing = [{"Id": i["Id"], "RepoTags": i.get("RepoTags") or [], "RepoDigests": i.get("RepoDigests") or []} for i in o.images.values()]
+            _send(self, 200, json.dumps(listing).encode(), {"Content-Type": "application/json"})
+        elif parts.path == "/containers/json":
             listing = o.list_containers(all_=query.get("all") == ["true"], filters=json.loads(query.get("filters", ["{}"])[0]))
             _send(self, 200, json.dumps(listing).encode(), {"Content-Type": "application/json"})
         elif len(segments) == 3 and segments[0] == "containers" and segments[2] == "json":
@@ -190,10 +193,25 @@ class FakeDocker(_Server):
             "State": {"Status": "running", "Running": True},
             "Config": {"Image": image},
         }
+        if image_id not in self.images:
+            self.add_image(image_id, repo_tags if repo_tags is not None else [image], repo_digests or [])
+
+    def add_image(
+        self,
+        image_id: str,
+        tags: list[str],
+        digests: list[str],
+        layers: list[str] | None = None,
+        identity: dict[str, Any] | None = None,
+    ) -> None:
+        """A local image. `identity` as Docker 29 gives it ({"Pull": [{"Repository": ...}]} or {"Build": [...]});
+        None leaves it out, as older engines do."""
         self.images[image_id] = {
             "Id": image_id,
-            "RepoTags": repo_tags if repo_tags is not None else [image],
-            "RepoDigests": repo_digests or [],
+            "RepoTags": tags,
+            "RepoDigests": digests,
+            "RootFS": {"Type": "layers", "Layers": layers or []},
+            **({"Identity": identity} if identity is not None else {}),
         }
 
     def only(self, *names: str) -> None:

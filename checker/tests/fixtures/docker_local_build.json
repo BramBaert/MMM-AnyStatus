@@ -1,0 +1,54 @@
+{
+  "anystatus-localtest:dev": {
+    "Id": "sha256:5f6e1031ae78a09bf80640c9a580dbb159e31df5b693ae19f391bb4e3daed1a1",
+    "RepoTags": [
+      "anystatus-localtest:dev"
+    ],
+    "RepoDigests": [
+      "anystatus-localtest@sha256:5f6e1031ae78a09bf80640c9a580dbb159e31df5b693ae19f391bb4e3daed1a1"
+    ],
+    "RootFS": {
+      "Type": "layers",
+      "Layers": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:8fc845bed180f897442794f074a6fc079b1a8bde4881bd39fb19139de69559f1",
+        "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd",
+        "sha256:cf0d544b5f33c53badefbd79aa92e97c64efde6a5d63631aa3dd57eb1da12495",
+        "sha256:df90d133f4027bce634ccf83bd436005c9a641732c469989b3b431ec3e7c9035"
+      ]
+    },
+    "Identity": {
+      "Build": [
+        {
+          "Ref": "j563j2wvzwiq79qz0e3ke3eon",
+          "CreatedAt": "2026-11-12T09:28:09.050595249Z"
+        }
+      ]
+    }
+  },
+  "python:3.14-slim": {
+    "Id": "sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f",
+    "RepoTags": [
+      "python:3.14-slim"
+    ],
+    "RepoDigests": [
+      "python@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f"
+    ],
+    "RootFS": {
+      "Type": "layers",
+      "Layers": [
+        "sha256:dd57f90311a2567b55ff22eeacff1602fd04ad7566e315957731359eab173b90",
+        "sha256:8fc845bed180f897442794f074a6fc079b1a8bde4881bd39fb19139de69559f1",
+        "sha256:8cfd26f2a283d91a55613451863815614262f690ab3a68942d839a0fa024aedd",
+        "sha256:cf0d544b5f33c53badefbd79aa92e97c64efde6a5d63631aa3dd57eb1da12495"
+      ]
+    },
+    "Identity": {
+      "Pull": [
+        {
+          "Repository": "docker.io/library/python"
+        }
+      ]
+    }
+  }
+}

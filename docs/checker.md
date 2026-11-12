@@ -449,6 +449,18 @@ Per image of a running container:
   Docker Hub doesn't count as a pull).
 - **Newer version:** the registry has a higher version tag of the same form (`1.27.3-alpine` → `1.27.4-alpine`,
   not → `1.28.0`). Only tags that read as versions count; `latest` is covered by the digest.
+- **An image built locally: its base instead.** Docker records no name for the base (no label, and the history
+  doesn't name it), but an image's layers start with its base's. So the base is the local image, pulled from a
+  registry and tagged, whose `RootFS.Layers` are the longest prefix of ours (equal counts: a `FROM` that adds no
+  layer). Its tag is asked about as above: "myapp (base python:3.14-slim rebuilt, rebuild)", "myapp (base python
+  3.14 → 3.15)". A base that is no longer in the image store (`docker image prune`) can't be found: the summary says
+  "myapp: base image not found (pruned?)" and the image doesn't count, rather than being `unknown`.
+- **Built locally or pulled?** Docker 29's image inspect says so: `Identity` is `{"Pull": [{"Repository": ...}]}`
+  for a pulled image and `{"Build": [...]}` for a built one; an image tagged locally under another name counts as
+  built (its tag isn't in the registry it came from). Older engines have no `Identity`: there an image with a
+  `RepoDigest` counts as pulled. That is right for Docker's classic image store, but with the containerd image store
+  (the default of new installs) a built image has a RepoDigest too (`myapp@sha256:…`) and would still be asked
+  about by its own name ("unknown (registry did not answer)").
 
 The value is the number of images with an update. It is **`warn` at most, never `crit`**: an update is "do it this
 weekend". `image_vulns` is what turns red when an update fixes something serious. The summary names the images, for

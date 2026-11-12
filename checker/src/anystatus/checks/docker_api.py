@@ -180,11 +180,25 @@ def running_images(client: DockerClient, timeout: float) -> list[RunningImage]:
     return [RunningImage(ref, image_id, tuple(names)) for (ref, image_id), names in sorted(found.items())]
 
 
-def image_info(client: DockerClient, image_id: str, timeout: float) -> tuple[list[str], list[str]]:
-    """(RepoTags, RepoDigests) of a local image."""
+def image_details(client: DockerClient, image_id: str, timeout: float) -> dict[str, Any]:
+    """The inspect answer for a local image (GET /images/{id}/json)."""
     data = client.get_json(f"/images/{quote(image_id, safe=':')}/json", timeout=timeout)
     if not isinstance(data, dict):
         raise CheckFailure("unexpected answer from the Docker API")
+    return data
+
+
+def image_list(client: DockerClient, timeout: float) -> list[dict[str, Any]]:
+    """The local images (GET /images/json): Id, RepoTags, RepoDigests and more, without their layers."""
+    data = client.get_json("/images/json", timeout=timeout)
+    if not isinstance(data, list):
+        raise CheckFailure("unexpected answer from the Docker API")
+    return [item for item in data if isinstance(item, dict)]
+
+
+def image_info(client: DockerClient, image_id: str, timeout: float) -> tuple[list[str], list[str]]:
+    """(RepoTags, RepoDigests) of a local image."""
+    data = image_details(client, image_id, timeout)
 
     def strings(key: str) -> list[str]:
         value = data.get(key)

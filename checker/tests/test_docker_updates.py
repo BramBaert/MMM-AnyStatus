@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fakes import FakeDocker, FakeRegistry, digest
+from fakes import FakeDocker, FakeRegistry, digest, fixture
 from helpers import parse
 
 from anystatus.checks import registry as registry_api
@@ -99,9 +99,113 @@ def test_any_of_several_local_digests_counts(tmp_path: Path, docker: FakeDocker,
     assert run(build(tmp_path, docker))[1].level == "ok"
 
 
-def test_a_locally_built_image_has_nothing_to_compare(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+# --- images built here: their base is checked instead
+
+
+def local_build(docker: FakeDocker, reg: FakeRegistry, *, identity: bool = True, repo_digest: bool = True) -> tuple[str, str]:
+    """The captured answers of Docker Desktop 29 (containerd image store) for an image built `FROM python:3.14-slim`
+    and for that base, with the base moved to the fake registry. Returns (the built image's id, the base's digest)."""
+    captured = fixture("docker_local_build.json")
+    built, base = captured["anystatus-localtest:dev"], captured["python:3.14-slim"]
+    python = f"{reg.host}/library/python"
+    base_digest = base["RepoDigests"][0].split("@")[1]
+    docker.add_image(
+        base["Id"],
+        [f"{python}:3.14-slim"],
+        [f"{python}@{base_digest}"],
+        base["RootFS"]["Layers"],
+        {"Pull": [{"Repository": python}]} if identity else None,
+    )
+    docker.add_image(
+        built["Id"],
+        built["RepoTags"],
+        built["RepoDigests"] if repo_digest else [],
+        built["RootFS"]["Layers"],
+        built["Identity"] if identity else None,
+    )
+    docker.add_container("app", "anystatus-localtest:dev", built["Id"], None)
+    return built["Id"], base_digest
+
+
+def test_a_locally_built_image_is_not_asked_about_by_its_own_name(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    """The bug from the first deployment: with the containerd image store a built image has a RepoDigest
+    (`anystatus-localtest@sha256:...`), which made it look like a Docker Hub image ("unknown, registry did not
+    answer"). Docker 29's Identity says it was built here, so its base is checked instead."""
+    _, base_digest = local_build(docker, reg)
+    reg.add("library/python", "3.14-slim", index=base_digest)
+    reg.tags = {"library/python": ["3.13-slim", "3.14-slim"]}
+    _, core = run(build(tmp_path, docker))
+    assert (core.level, core.summary) == ("ok", "all 1 image up to date")
+    assert not any("anystatus-localtest" in p for _, p in reg.requests)
+    assert ("HEAD", "/v2/library/python/manifests/3.14-slim") in reg.requests
+
+
+def test_a_rebuilt_base_says_rebuild(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    local_build(docker, reg)
+    reg.add("library/python", "3.14-slim", index=digest("python-rebuilt"))
+    reg.tags = {"library/python": ["3.14-slim"]}
+    _, core = run(build(tmp_path, docker))
+    assert (core.level, core.value) == ("warn", 1)
+    assert core.summary == f"1 image: anystatus-localtest (base {reg.host}/library/python:3.14-slim rebuilt, rebuild)"
+
+
+def test_a_newer_base_version(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    _, base_digest = local_build(docker, reg)
+    reg.add("library/python", "3.14-slim", index=base_digest)
+    reg.tags = {"library/python": ["3.14-slim", "3.15-slim", "4.0-slim", "3.15"]}
+    _, core = run(build(tmp_path, docker))
+    assert core.summary == f"1 image: anystatus-localtest (base {reg.host}/library/python 3.14 → 3.15)"
+
+
+def test_without_identity_an_image_without_repo_digests_is_built_here(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    """Docker before 29 with the classic image store: no Identity, and a built image has no RepoDigests."""
+    local_build(docker, reg, identity=False, repo_digest=False)
+    reg.add("library/python", "3.14-slim", index=digest("python-rebuilt"))
+    _, core = run(build(tmp_path, docker, 'versions = "none"'))
+    assert core.summary == f"1 image: anystatus-localtest (base {reg.host}/library/python:3.14-slim rebuilt, rebuild)"
+
+
+def test_the_longest_layer_prefix_is_the_base(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    layers = [digest(f"layer-{i}") for i in range(5)]
+    pulled = {"Pull": [{"Repository": f"{reg.host}/library/debian"}]}
+    docker.add_image("sha256:" + "d" * 64, [f"{reg.host}/library/debian:13"], [f"{reg.host}/library/debian@{digest('deb')}"], layers[:1], pulled)
+    docker.add_image(
+        "sha256:" + "e" * 64,
+        [f"{reg.host}/library/python:3.14"],
+        [f"{reg.host}/library/python@{digest('py')}"],
+        layers[:3],
+        {"Pull": [{"Repository": f"{reg.host}/library/python"}]},
+    )
+    docker.add_image("sha256:" + "f" * 64, ["other:1"], ["other@" + digest("o")], layers[:4], {"Build": [{}]})  # built here: not a base
+    docker.add_image("sha256:" + "a" * 64, ["mine:dev"], ["mine@" + digest("m")], layers, {"Build": [{}]})
+    docker.add_container("mine", "mine:dev", "sha256:" + "a" * 64, None)
+    reg.add("library/python", "3.14", index=digest("py"))
+    reg.add("library/debian", "13", index=digest("deb-new"))
+    _, core = run(build(tmp_path, docker, 'versions = "none"'))
+    assert core.summary == "all 1 image up to date"  # python's layers are the longest prefix; debian's rebuild doesn't count
+
+
+def test_a_pruned_base_is_said_in_the_summary(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    built_id, _ = local_build(docker, reg)
+    docker.images = {built_id: docker.images[built_id]}  # docker image prune removed python:3.14-slim
+    web_id = "sha256:" + digest("web").split(":")[1]
+    docker.add_image(
+        web_id,
+        [f"{reg.host}/acme/web:latest"],
+        [f"{reg.host}/acme/web@{digest('web-1')}"],
+        [digest("w")],
+        {"Pull": [{"Repository": f"{reg.host}/acme/web"}]},
+    )
+    docker.add_container("web", f"{reg.host}/acme/web:latest", web_id, None)
+    reg.add("acme/web", "latest", manifest=digest("web-1"))
+    _, core = run(build(tmp_path, docker))
+    assert (core.level, core.summary) == ("ok", "all 1 image up to date; anystatus-localtest: base image not found (pruned?)")
+    assert "unknown" not in (core.summary or "")
+
+
+def test_a_locally_built_image_without_layers_has_no_base(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     docker.add_container("mine", "mine:dev", "sha256:" + "2" * 64, None)
-    assert run(build(tmp_path, docker))[1].summary == "no images to check"
+    assert run(build(tmp_path, docker))[1].summary == "no images to check; mine: base image not found (pruned?)"
 
 
 # --- versions
