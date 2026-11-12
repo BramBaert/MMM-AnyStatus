@@ -45,9 +45,7 @@ def render_overview(source: str, results: Sequence[dict[str, Any]]) -> str:
     lines = [f"{source}: {len(results)} check(s)", ""]
     width = max((len(str(r["id"])) for r in results), default=2)
     for r in results:
-        lines.append(
-            f"{r['level'].upper():8} {r['id']!s:{width}}  {r.get('summary', '')}  [{r['ts']}, ttl {r['ttl']} s]"
-        )
+        lines.append(f"{r['level'].upper():8} {r['id']!s:{width}}  {r.get('summary', '')}  [{r['ts']}, ttl {r['ttl']} s]")
     lines += ["", "GET /results for the JSON document."]
     return "\n".join(lines) + "\n"
 

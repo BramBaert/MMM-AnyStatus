@@ -109,9 +109,7 @@ class Http(Check):
             if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
                 table.error("'url' must look like https://host/path (http or https)")
             elif parts.username is not None or parts.password is not None:
-                table.error(
-                    "credentials in the URL are not allowed: use 'username' and 'password_env', or 'bearer_env'"
-                )
+                table.error("credentials in the URL are not allowed: use 'username' and 'password_env', or 'bearer_env'")
             else:
                 https = parts.scheme.lower() == "https"
                 host = parts.hostname

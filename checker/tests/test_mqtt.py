@@ -370,10 +370,9 @@ def bad(text: str, tmp_path: Path) -> str:
 
 
 def test_broker_table_defaults_and_keys(tmp_path: Path) -> None:
-    text = (
-        '[mqtt.a]\nhost = "h"\n[mqtt.b]\nhost = "h"\ntls = true\nusername = "u"\npassword_env = "PW"\n'
-        'client_id = "x"\n' + check_cfg("")
-    ).replace('broker = "home"', 'broker = "a"')
+    text = ('[mqtt.a]\nhost = "h"\n[mqtt.b]\nhost = "h"\ntls = true\nusername = "u"\npassword_env = "PW"\nclient_id = "x"\n' + check_cfg("")).replace(
+        'broker = "home"', 'broker = "a"'
+    )
     config = build_with_env(text, tmp_path, {"PW": "s3"})
     a, b = config.sections["mqtt"]["a"], config.sections["mqtt"]["b"]
     assert (a.port, a.tls) == (1883, False)
@@ -387,20 +386,14 @@ def build_with_env(text: str, tmp_path: Path, env: dict[str, str]) -> Any:
 def test_config_errors(tmp_path: Path) -> None:
     assert "unknown key 'hots'" in bad('[mqtt.home]\nhost = "h"\nhots = 1\n' + check_cfg(""), tmp_path)
     assert "missing 'host'" in bad("[mqtt.home]\n" + check_cfg(""), tmp_path)
-    assert "'ca_file' needs tls" in bad(
-        '[mqtt.home]\nhost = "h"\nca_file = "ca.pem"\n' + check_cfg(""), tmp_path
-    )
+    assert "'ca_file' needs tls" in bad('[mqtt.home]\nhost = "h"\nca_file = "ca.pem"\n' + check_cfg(""), tmp_path)
     assert "unknown broker 'away'" in bad(BROKER + check_cfg("").replace("home", "away"), tmp_path)
     assert "wildcards are not supported yet" in bad(BROKER + check_cfg("", "a/+/b"), tmp_path)
     assert "wildcards are not supported yet" in bad(BROKER + check_cfg("", "a/#"), tmp_path)
-    assert "cannot be used together" in bad(
-        BROKER + check_cfg('json = "a"\nlevels = { On = "ok" }'), tmp_path
-    )
+    assert "cannot be used together" in bad(BROKER + check_cfg('json = "a"\nlevels = { On = "ok" }'), tmp_path)
     assert "not one of" in bad(BROKER + check_cfg('levels = { On = "fine" }'), tmp_path)
     assert "'json': " in bad(BROKER + check_cfg('json = "a..b"'), tmp_path)
-    assert "missing 'topic'" in bad(
-        BROKER + check_cfg("").replace('topic = "boiler/heartbeat"', ""), tmp_path
-    )
+    assert "missing 'topic'" in bad(BROKER + check_cfg("").replace('topic = "boiler/heartbeat"', ""), tmp_path)
     assert "unknown key 'colour'" in bad(BROKER + check_cfg('colour = "red"'), tmp_path)
 
 

@@ -41,9 +41,7 @@ def add(docker: FakeDocker, reg: FakeRegistry, name: str, repo: str, tag: str, l
 
 
 def build(tmp_path: Path, docker: FakeDocker, extra: str = "", env: dict[str, str] | None = None) -> Any:
-    text = (
-        f'[[check]]\nid = "u"\ntype = "docker_updates"\ndocker = "{docker.url}"\ninterval = "1d"\n{extra}\n'
-    )
+    text = f'[[check]]\nid = "u"\ntype = "docker_updates"\ndocker = "{docker.url}"\ninterval = "1d"\n{extra}\n'
     return parse(text, tmp_path, env).checks[0]
 
 
@@ -72,9 +70,7 @@ def test_a_rebuilt_tag_is_a_warning(tmp_path: Path, docker: FakeDocker, reg: Fak
     assert (core.level, core.value, core.summary) == ("warn", 1, "1 image: web (rebuilt)")
 
 
-def test_a_multi_arch_tag_compares_the_index_digest(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_a_multi_arch_tag_compares_the_index_digest(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     """The local RepoDigest of a multi-arch image is the index's. A HEAD that accepts only manifests would answer
     one platform's digest and look like a rebuild; the check asks for indexes too, so it compares like with like."""
     index, platform = digest("index-1"), digest("amd64-1")
@@ -103,9 +99,7 @@ def test_any_of_several_local_digests_counts(tmp_path: Path, docker: FakeDocker,
     assert run(build(tmp_path, docker))[1].level == "ok"
 
 
-def test_a_locally_built_image_has_nothing_to_compare(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_a_locally_built_image_has_nothing_to_compare(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     docker.add_container("mine", "mine:dev", "sha256:" + "2" * 64, None)
     assert run(build(tmp_path, docker))[1].summary == "no images to check"
 
@@ -178,14 +172,10 @@ def test_the_tag_list_follows_the_pages(tmp_path: Path, docker: FakeDocker, reg:
     assert len(pages) == 4 and "last=2" in pages[1] and "last=6" in pages[3]
 
 
-def test_the_tag_list_is_bounded(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_tag_list_is_bounded(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry, monkeypatch: pytest.MonkeyPatch) -> None:
     add(docker, reg, "web", "acme/web", "1.0.0", digest("w"))
     reg.add("acme/web", "1.0.0", manifest=digest("w"))
-    reg.tags = {
-        "acme/web": [f"0.{i}.0" for i in range(50)] + ["1.0.1"]
-    }  # the newer tag is on a page we won't read
+    reg.tags = {"acme/web": [f"0.{i}.0" for i in range(50)] + ["1.0.1"]}  # the newer tag is on a page we won't read
     reg.page_size = 5
     monkeypatch.setattr(registry_api, "MAX_TAG_PAGES", 3)
     _, core = run(build(tmp_path, docker))
@@ -207,9 +197,7 @@ def test_an_image_started_by_digest_is_skipped(tmp_path: Path, docker: FakeDocke
     assert not any("/acme/web/" in p for _, p in reg.requests)
 
 
-def test_a_container_that_shows_only_an_image_id_uses_the_images_tag(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_a_container_that_shows_only_an_image_id_uses_the_images_tag(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     add(docker, reg, "web", "acme/web", "latest", digest("web-1"))
     docker.list[0]["Image"] = docker.list[0]["ImageID"]  # the tag moved to a newer local image
     reg.add("acme/web", "latest", manifest=digest("web-9"))
@@ -226,19 +214,14 @@ def test_ignore(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     assert run(build(tmp_path, docker))[1].value == 2
     assert run(build(tmp_path, docker, 'ignore = ["postgres"]'))[1].summary == "1 image: web (rebuilt)"
     before = len(reg.requests)
-    assert (
-        run(build(tmp_path, docker, 'ignore = ["acme/web", "postgres:16"]'))[1].summary
-        == "no images to check"
-    )
+    assert run(build(tmp_path, docker, 'ignore = ["acme/web", "postgres:16"]'))[1].summary == "no images to check"
     assert len(reg.requests) == before  # ignored images are not even asked about
 
 
 # --- registries that fail
 
 
-def test_one_registry_down_makes_that_image_unknown(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_one_registry_down_makes_that_image_unknown(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     with FakeRegistry() as down:
         add(docker, reg, "web", "acme/web", "latest", digest("web-1"))
         add(docker, down, "api", "acme/api", "latest", digest("api-1"))
@@ -249,19 +232,14 @@ def test_one_registry_down_makes_that_image_unknown(
     assert core.summary == "1 image: web (rebuilt); 1 unknown (registry did not answer): api"
 
 
-def test_one_registry_down_and_nothing_else_to_report(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_one_registry_down_and_nothing_else_to_report(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     with FakeRegistry() as down:
         add(docker, reg, "web", "acme/web", "latest", digest("web-1"))
         add(docker, down, "api", "acme/api", "latest", digest("api-1"))
         reg.add("acme/web", "latest", manifest=digest("web-1"))
         down.status = 500
         _, core = run(build(tmp_path, docker))
-    assert (
-        core.level == "ok"
-        and core.summary == "all 1 image up to date; 1 unknown (registry did not answer): api"
-    )
+    assert core.level == "ok" and core.summary == "all 1 image up to date; 1 unknown (registry did not answer): api"
 
 
 def test_no_registry_answering_is_unknown(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
@@ -276,9 +254,7 @@ def test_no_registry_answering_is_unknown(tmp_path: Path, docker: FakeDocker, re
 def test_a_registry_that_is_not_there_is_unknown(tmp_path: Path, docker: FakeDocker) -> None:
     with FakeRegistry() as gone:
         host = gone.host
-    docker.add_container(
-        "web", f"{host}/acme/web:latest", "sha256:" + "4" * 64, [f"{host}/acme/web@{digest('w')}"]
-    )
+    docker.add_container("web", f"{host}/acme/web:latest", "sha256:" + "4" * 64, [f"{host}/acme/web@{digest('w')}"])
     outcome = execute(build(tmp_path, docker))
     assert isinstance(outcome, Failure) and outcome.summary == "no registry answered"
 
@@ -301,9 +277,7 @@ def test_many_updates_are_clipped(tmp_path: Path, docker: FakeDocker, reg: FakeR
         reg.add(f"acme/app{i}", "latest", manifest=digest(f"b{i}"))
     _, core = run(build(tmp_path, docker))
     assert core.value == 8
-    assert core.summary == (
-        "8 images: app0 (rebuilt), app1 (rebuilt), app2 (rebuilt), app3 (rebuilt), app4 (rebuilt), +3 more"
-    )
+    assert core.summary == ("8 images: app0 (rebuilt), app1 (rebuilt), app2 (rebuilt), app3 (rebuilt), app4 (rebuilt), +3 more")
 
 
 # --- authentication
@@ -322,9 +296,7 @@ def test_the_bearer_challenge_flow(tmp_path: Path, docker: FakeDocker, reg: Fake
     assert reg.token not in core.summary
 
 
-def test_registry_auth_env_goes_to_the_registry_as_basic_auth(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_registry_auth_env_goes_to_the_registry_as_basic_auth(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     add(docker, reg, "web", "acme/web", "latest", digest("w"))
     reg.add("acme/web", "latest", manifest=digest("w-new"))
     reg.require_auth = True
@@ -347,9 +319,7 @@ def test_credentials_are_refused_without_them(tmp_path: Path, docker: FakeDocker
     assert isinstance(outcome, Failure) and outcome.summary == "no registry answered"
 
 
-def test_credentials_never_go_to_a_token_service_on_another_host(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_credentials_never_go_to_a_token_service_on_another_host(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     add(docker, reg, "web", "acme/web", "latest", digest("w"))
     reg.add("acme/web", "latest", manifest=digest("w"))
     reg.require_auth = True
@@ -361,15 +331,11 @@ def test_credentials_never_go_to_a_token_service_on_another_host(
     assert "s3cret" not in repr(outcome)
 
 
-def test_a_failure_summary_never_contains_the_token_or_credentials(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_a_failure_summary_never_contains_the_token_or_credentials(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     add(docker, reg, "web", "acme/web", "latest", digest("w"))
     reg.require_auth = True
     reg.token_status = 500  # the token service is broken
-    outcome = execute(
-        build(tmp_path, docker, f'registry_auth_env = {{ "{reg.host}" = "A" }}', env={"A": "u:pw-zzz"})
-    )
+    outcome = execute(build(tmp_path, docker, f'registry_auth_env = {{ "{reg.host}" = "A" }}', env={"A": "u:pw-zzz"}))
     assert isinstance(outcome, Failure)
     assert "pw-zzz" not in repr(outcome) and reg.token not in repr(outcome)
 
@@ -426,9 +392,7 @@ def test_config_errors(tmp_path: Path, extra: str, env: dict[str, str] | None, m
     assert message in "; ".join(err.value.problems)
 
 
-def test_warn_can_be_raised_and_a_missing_credential_variable_is_unknown(
-    tmp_path: Path, docker: FakeDocker, reg: FakeRegistry
-) -> None:
+def test_warn_can_be_raised_and_a_missing_credential_variable_is_unknown(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     add(docker, reg, "web", "acme/web", "latest", digest("w"))
     reg.add("acme/web", "latest", manifest=digest("w2"))
     _, core = run(build(tmp_path, docker, "warn = 2"))

@@ -22,9 +22,7 @@ def make_db(tmp_path: Path, *values: object) -> None:
     conn.close()
 
 
-def spec_for(
-    tmp_path: Path, extra: str = "", query: str = "SELECT count(*) FROM outgoing WHERE sent_at IS NULL"
-):  # type: ignore[no-untyped-def]
+def spec_for(tmp_path: Path, extra: str = "", query: str = "SELECT count(*) FROM outgoing WHERE sent_at IS NULL"):  # type: ignore[no-untyped-def]
     text = f'[[check]]\nid = "queue"\ntype = "sql_value"\ndatabase = "sqlite:queue.db"\nquery = "{query}"\n{extra}\n'
     return parse(text, tmp_path).checks[0]
 

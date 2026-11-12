@@ -98,14 +98,8 @@ class Table:
         if value is _MISSING:
             return None
         items = value if isinstance(value, list) else [value]
-        if (
-            not items
-            or not all(isinstance(i, int) and not isinstance(i, bool) for i in items)
-            or any(not minimum <= i <= maximum for i in items)
-        ):
-            self.error(
-                f"'{key}' must be a number or a list of numbers between {minimum} and {maximum}, such as [200]"
-            )
+        if not items or not all(isinstance(i, int) and not isinstance(i, bool) for i in items) or any(not minimum <= i <= maximum for i in items):
+            self.error(f"'{key}' must be a number or a list of numbers between {minimum} and {maximum}, such as [200]")
             return None
         return list(items)
 

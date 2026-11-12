@@ -43,9 +43,7 @@ class CheckSpec:
     summary: str | None
     check: Check
     secrets: tuple[str, ...] = ()
-    env_problem: str | None = (
-        None  # a named environment variable is not set: every run is a failure with this text
-    )
+    env_problem: str | None = None  # a named environment variable is not set: every run is a failure with this text
 
 
 @dataclass(frozen=True)
@@ -128,9 +126,7 @@ def build_config(raw: Mapping[str, Any], base_dir: Path, env: Mapping[str, str])
         ctx.errors.append("no checks configured: add at least one [[check]]")
     seen: set[str] = set()
     for index, entry in enumerate(entries, start=1):
-        spec = _build_check(
-            entry, index, ctx, default_interval or DEFAULT_INTERVAL, default_timeout, default_confirm
-        )
+        spec = _build_check(entry, index, ctx, default_interval or DEFAULT_INTERVAL, default_timeout, default_confirm)
         if spec is None:
             continue
         if spec.id in seen:
@@ -163,9 +159,7 @@ def _build_check(
 
     check_id = t.req_str("id")
     if check_id and not ID_PATTERN.match(check_id):
-        t.error(
-            "'id' may only use letters, digits and . _ : / - (at most 128 characters, starting with a letter or digit)"
-        )
+        t.error("'id' may only use letters, digits and . _ : / - (at most 128 characters, starting with a letter or digit)")
     type_name = t.req_str("type")
     label = t.opt_str("label", check_id) or check_id
     group = t.opt_str("group")
@@ -191,9 +185,7 @@ def _build_check(
     worse: Worse = "below" if t.choice("worse", ("above", "below"), traits.worse) == "below" else "above"
     if warn is not None and crit is not None and (warn >= crit if worse == "above" else warn <= crit):
         order = "warn < crit" if worse == "above" else "warn > crit"
-        t.error(
-            f'limits are out of order for worse = "{worse}": need {order}, got warn = {warn:g}, crit = {crit:g}'
-        )
+        t.error(f'limits are out of order for worse = "{worse}": need {order}, got warn = {warn:g}, crit = {crit:g}')
 
     if summary is not None:
         _check_template(

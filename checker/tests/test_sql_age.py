@@ -167,9 +167,7 @@ def test_sqlite_paths(tmp_path: Path) -> None:
         ("postgresql://m@db.example/b", "postgres"),
     ],
 )
-def test_missing_extra_is_a_config_error_naming_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str, extra: str
-) -> None:
+def test_missing_extra_is_a_config_error_naming_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, url: str, extra: str) -> None:
     monkeypatch.setitem(sys.modules, "pymysql", None)
     monkeypatch.setitem(sys.modules, "psycopg", None)
     with pytest.raises(ValueError, match=rf"\[{extra}\]"):

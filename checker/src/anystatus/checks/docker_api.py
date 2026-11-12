@@ -47,8 +47,7 @@ def parse_endpoint(text: str) -> Endpoint:
             raise ValueError("a unix address looks like unix:///var/run/docker.sock")
         if is_windows():
             raise ValueError(
-                "unix sockets are not available on Windows: reach Docker through a socket proxy, "
-                'for example docker = "tcp://localhost:2375"'
+                'unix sockets are not available on Windows: reach Docker through a socket proxy, for example docker = "tcp://localhost:2375"'
             )
         return Endpoint(unix_path=parts.path)
     if parts.scheme == "tcp":
@@ -118,9 +117,7 @@ class DockerClient:
         except http.client.HTTPException as exc:
             raise CheckFailure("invalid answer from Docker", detail=type(exc).__name__) from exc
         except OSError as exc:
-            raise CheckFailure(
-                f"Docker unreachable: {describe_exception(exc)}", detail=f"{type(exc).__name__}: {exc}"
-            ) from exc
+            raise CheckFailure(f"Docker unreachable: {describe_exception(exc)}", detail=f"{type(exc).__name__}: {exc}") from exc
         finally:
             conn.close()
         status = response.status
@@ -161,9 +158,7 @@ class RunningImage:
 
 
 def _looks_like_id(reference: str) -> bool:
-    return reference.startswith("sha256:") or (
-        len(reference) in (12, 64) and all(c in "0123456789abcdef" for c in reference)
-    )
+    return reference.startswith("sha256:") or (len(reference) in (12, 64) and all(c in "0123456789abcdef" for c in reference))
 
 
 def running_images(client: DockerClient, timeout: float) -> list[RunningImage]:

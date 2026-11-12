@@ -151,9 +151,7 @@ class Broker:
 
     # paho callbacks (paho's thread)
 
-    def _on_connect(
-        self, client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any = None
-    ) -> None:
+    def _on_connect(self, client: Any, userdata: Any, flags: Any, reason_code: Any, properties: Any = None) -> None:
         if getattr(reason_code, "is_failure", False):
             log.info("broker %s: connection refused (%s)", self.name, reason_code)
             return
@@ -164,9 +162,7 @@ class Broker:
         for topic in self.topics():  # resubscribe on every (re)connect: a clean session forgets them
             client.subscribe(topic, 0)
 
-    def _on_disconnect(
-        self, client: Any, userdata: Any, flags: Any = None, reason_code: Any = None, properties: Any = None
-    ) -> None:
+    def _on_disconnect(self, client: Any, userdata: Any, flags: Any = None, reason_code: Any = None, properties: Any = None) -> None:
         with self._lock:
             was = self._connected
             self._connected = False
@@ -224,9 +220,7 @@ def parse_brokers(raw: Any, ctx: Context) -> dict[str, Broker]:
             env_problem = f"environment variable {', '.join(dict.fromkeys(t.missing_env))} not set"
             t.warning(env_problem)
         if not paho_available():
-            t.error(
-                "mqtt needs the 'mqtt' extra, which is not installed: uv add \"mmm-anystatus-checker[mqtt]\""
-            )
+            t.error("mqtt needs the 'mqtt' extra, which is not installed: uv add \"mmm-anystatus-checker[mqtt]\"")
         brokers[name] = Broker(
             name,
             host,
@@ -289,9 +283,7 @@ class MqttCheck(Check):
         broker = brokers.get(broker_name)
         if broker_name and broker is None:
             known = ", ".join(sorted(brokers)) or "none configured"
-            table.error(
-                f"unknown broker '{broker_name}' (known: {known}); add a [mqtt.{broker_name}] section"
-            )
+            table.error(f"unknown broker '{broker_name}' (known: {known}); add a [mqtt.{broker_name}] section")
             broker = Broker(broker_name, "", 1883)
         elif broker is None:
             broker = Broker("", "", 1883)
@@ -308,9 +300,7 @@ class MqttCheck(Check):
                 table.error("'levels' is empty")
             for payload, level in levels.items():
                 if level not in LEVELS:
-                    table.error(
-                        f"'levels': '{payload}' maps to '{level}', which is not one of {', '.join(LEVELS)}"
-                    )
+                    table.error(f"'levels': '{payload}' maps to '{level}', which is not one of {', '.join(LEVELS)}")
         return cls(
             broker,
             topic,
@@ -436,9 +426,7 @@ class MqttCheck(Check):
         try:
             decoded: Any = json.loads(payload)
         except ValueError as exc:
-            raise CheckFailure(
-                "the payload is not JSON" if self.json_path else "the payload is not a number"
-            ) from exc
+            raise CheckFailure("the payload is not JSON" if self.json_path else "the payload is not a number") from exc
         if self.json_path is not None:
             try:
                 decoded = dig(decoded, self.json_path)

@@ -74,9 +74,7 @@ def run_once(config: Config, ids: Sequence[str] | None) -> int:
     wake = threading.Event()
     clock = SystemClock()
     snapshot = Snapshot(config.name)
-    scheduler = Scheduler(
-        specs, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, store=None, spread=0.0
-    )
+    scheduler = Scheduler(specs, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, store=None, spread=0.0)
     scheduler.start()
     while not scheduler.first_runs_done():
         scheduler.tick()
@@ -97,9 +95,7 @@ def run_service(config: Config) -> int:
     try:
         server = ResultsServer(config.listen[0], config.listen[1], snapshot)
     except OSError as exc:
-        print(
-            f"cannot listen on {config.listen[0]}:{config.listen[1]}: {exc.strerror or exc}", file=sys.stderr
-        )
+        print(f"cannot listen on {config.listen[0]}:{config.listen[1]}: {exc.strerror or exc}", file=sys.stderr)
         return 2
     stop = threading.Event()
     wake = threading.Event()
@@ -111,9 +107,7 @@ def run_service(config: Config) -> int:
     signal.signal(signal.SIGINT, request_stop)
     signal.signal(signal.SIGTERM, request_stop)
     clock = SystemClock()
-    scheduler = Scheduler(
-        config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, store=store
-    )
+    scheduler = Scheduler(config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, store=store)
     scheduler.start()
     server.start()
     log.info("%s: %d check(s), serving http://%s:%d/results", config.name, len(config.checks), *config.listen)

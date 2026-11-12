@@ -150,9 +150,7 @@ def test_expect_status(server: tuple[str, list], tmp_path: Path) -> None:
     url, _ = server
     assert run(spec_for(tmp_path, f"{url}/bad", "expect_status = [503]"))[1].level == "ok"
     assert run(spec_for(tmp_path, f"{url}/bad", "expect_status = 503"))[1].level == "ok"
-    assert run(spec_for(tmp_path, f"{url}/ok", "expect_status = [204, 301]"))[0] == Observation(
-        level="crit", summary="HTTP 200"
-    )
+    assert run(spec_for(tmp_path, f"{url}/ok", "expect_status = [204, 301]"))[0] == Observation(level="crit", summary="HTTP 200")
 
 
 def test_query_string_is_sent(server: tuple[str, list], tmp_path: Path) -> None:
@@ -167,9 +165,7 @@ def test_query_string_is_sent(server: tuple[str, list], tmp_path: Path) -> None:
 
 def test_json_number(server: tuple[str, list], tmp_path: Path) -> None:
     url, _ = server
-    outcome, core = run(
-        spec_for(tmp_path, f"{url}/json", 'json = "jobs.photos.count"\nwarn = 40\ncrit = 100')
-    )
+    outcome, core = run(spec_for(tmp_path, f"{url}/json", 'json = "jobs.photos.count"\nwarn = 40\ncrit = 100'))
     assert isinstance(outcome, Reading) and outcome.value == 42
     assert (core.level, core.value, core.summary) == ("warn", 42, "jobs.photos.count = 42")
 
@@ -190,9 +186,7 @@ def test_json_list_index_and_numeric_string(server: tuple[str, list], tmp_path: 
         ("jobs", "'jobs' is not a number"),
     ],
 )
-def test_json_problems_are_failures(
-    server: tuple[str, list], tmp_path: Path, path: str, summary: str
-) -> None:
+def test_json_problems_are_failures(server: tuple[str, list], tmp_path: Path, path: str, summary: str) -> None:
     url, _ = server
     outcome, core = run(spec_for(tmp_path, f"{url}/json", f'json = "{path}"'))
     assert outcome == Failure(summary)
@@ -357,9 +351,7 @@ def test_verify_tls_true_and_plain_http_have_no_warning(tmp_path: Path) -> None:
     for extra in ("", "verify_tls = true"):
         config = parse(f'[[check]]\nid = "h"\ntype = "http"\nurl = "https://x.example/"\n{extra}\n', tmp_path)
         assert config.warnings == ()
-    config = parse(
-        '[[check]]\nid = "h"\ntype = "http"\nurl = "http://x.example/"\nverify_tls = false\n', tmp_path
-    )
+    config = parse('[[check]]\nid = "h"\ntype = "http"\nurl = "http://x.example/"\nverify_tls = false\n', tmp_path)
     assert config.warnings == ()
 
 

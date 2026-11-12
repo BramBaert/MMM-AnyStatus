@@ -22,9 +22,7 @@ from anystatus.model import CheckFailure, Observation, Reading
 from anystatus.scheduler import StoreMemory, SystemClock
 
 ADDRESS = os.environ.get("ANYSTATUS_TEST_MQTT")
-pytestmark = pytest.mark.skipif(
-    not ADDRESS, reason="set ANYSTATUS_TEST_MQTT=host:port to run against a broker"
-)
+pytestmark = pytest.mark.skipif(not ADDRESS, reason="set ANYSTATUS_TEST_MQTT=host:port to run against a broker")
 
 
 def wait_for(condition: Callable[[], bool], seconds: float = 10.0) -> None:

@@ -147,6 +147,4 @@ class TlsExpiry(Check):
             days = days_between(not_after_from_der(der), _now())
         except (OSError, ValueError):
             return Observation(level="crit", summary="certificate expired")
-        return Observation(
-            level="crit", summary=f"expired {abs(days):.1f} days ago", value=round(days, 1), unit="d"
-        )
+        return Observation(level="crit", summary=f"expired {abs(days):.1f} days ago", value=round(days, 1), unit="d")

@@ -142,9 +142,7 @@ def test_the_average_is_the_mean_of_the_replies() -> None:
     assert result.text == "2/3 answered, 13.2 ms"
 
 
-@pytest.mark.parametrize(
-    "text", [IPUTILS_NONE, BUSYBOX_NONE, WINDOWS_TIMEOUT, WINDOWS_UNREACHABLE, WINDOWS_DUTCH_TIMEOUT]
-)
+@pytest.mark.parametrize("text", [IPUTILS_NONE, BUSYBOX_NONE, WINDOWS_TIMEOUT, WINDOWS_UNREACHABLE, WINDOWS_DUTCH_TIMEOUT])
 def test_no_answer_is_crit_not_a_failure(text: str) -> None:
     result = interpret(text, rc=1)
     assert result == Observation(level="crit", summary="no answer")

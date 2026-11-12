@@ -48,9 +48,7 @@ def fake(monkeypatch: pytest.MonkeyPatch, total_gb: float, used_gb: float, free_
         (100, 0, "crit"),
     ],
 )
-def test_used_percent_with_the_default_limits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, used: float, free: float, level: str
-) -> None:
+def test_used_percent_with_the_default_limits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, used: float, free: float, level: str) -> None:
     fake(monkeypatch, used + free, used, free)
     spec = spec_for(tmp_path)
     outcome = execute(spec)
@@ -78,9 +76,7 @@ def test_own_limits_replace_the_defaults(tmp_path: Path, monkeypatch: pytest.Mon
     assert judge(spec, execute(spec)).level == "warn"
 
 
-def test_measure_free_is_gigabytes_worse_below_with_no_default_limits(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_measure_free_is_gigabytes_worse_below_with_no_default_limits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake(monkeypatch, 1000, 999, 1)
     spec = spec_for(tmp_path, 'measure = "free"')
     outcome = execute(spec)
@@ -90,12 +86,8 @@ def test_measure_free_is_gigabytes_worse_below_with_no_default_limits(
     assert (spec.limits.warn, spec.limits.crit) == (None, None)
 
 
-@pytest.mark.parametrize(
-    ("free", "level"), [(50, "ok"), (20, "warn"), (10, "warn"), (5, "crit"), (1, "crit")]
-)
-def test_measure_free_limits_are_reached_downwards(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, free: float, level: str
-) -> None:
+@pytest.mark.parametrize(("free", "level"), [(50, "ok"), (20, "warn"), (10, "warn"), (5, "crit"), (1, "crit")])
+def test_measure_free_limits_are_reached_downwards(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, free: float, level: str) -> None:
     fake(monkeypatch, 1000, 1000 - free, free)
     spec = spec_for(tmp_path, 'measure = "free"\nwarn = 20\ncrit = 5')
     assert judge(spec, execute(spec)).level == level
@@ -114,9 +106,7 @@ def test_a_missing_path_is_a_failure(tmp_path: Path) -> None:
     assert judge(spec, outcome).level == "unknown"
 
 
-def test_other_errors_are_a_failure_without_the_message(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_other_errors_are_a_failure_without_the_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def broken(path: str) -> Usage:
         raise PermissionError(13, "secret detail")
 

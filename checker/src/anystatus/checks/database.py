@@ -44,10 +44,7 @@ def load_driver(kind: str) -> ModuleType:
     try:
         return importlib.import_module(module_name)
     except ImportError as exc:
-        raise ValueError(
-            f"this database needs the '{extra}' extra, which is not installed: "
-            f'uv add "mmm-anystatus-checker[{extra}]"'
-        ) from exc
+        raise ValueError(f"this database needs the '{extra}' extra, which is not installed: uv add \"mmm-anystatus-checker[{extra}]\"") from exc
 
 
 def parse_database_url(url: str, password: str | None, base_dir: Path) -> DatabaseTarget:
@@ -64,13 +61,9 @@ def parse_database_url(url: str, password: str | None, base_dir: Path) -> Databa
         raise ValueError("'database' is not a valid URL") from exc
     kind = _SCHEMES.get(scheme)
     if kind is None:
-        raise ValueError(
-            f"'database' must start with sqlite:, mysql://, mariadb:// or postgresql://, not '{scheme or url}'"
-        )
+        raise ValueError(f"'database' must start with sqlite:, mysql://, mariadb:// or postgresql://, not '{scheme or url}'")
     if parsed.password is not None:
-        raise ValueError(
-            "a password in the database URL is not allowed: use 'password_env' to name an environment variable"
-        )
+        raise ValueError("a password in the database URL is not allowed: use 'password_env' to name an environment variable")
     if kind == "sqlite":
         if password is not None:
             raise ValueError("'password_env' does not apply to SQLite")
@@ -133,9 +126,7 @@ def fetch_first_row(target: DatabaseTarget, query: str, timeout: float) -> tuple
         return _fetch_postgres(driver, target, query, seconds)
     except Exception as exc:
         if _is_timeout(target.kind, exc):
-            raise CheckFailure(
-                f"query timed out after {seconds} s", detail=f"{type(exc).__name__}: {exc}"
-            ) from exc
+            raise CheckFailure(f"query timed out after {seconds} s", detail=f"{type(exc).__name__}: {exc}") from exc
         raise
 
 
@@ -150,9 +141,7 @@ def _is_timeout(kind: str, exc: Exception) -> bool:
     return type(exc).__name__ == "QueryCanceled"
 
 
-def _fetch_mysql(
-    driver: ModuleType, target: DatabaseTarget, query: str, seconds: int
-) -> tuple[Any, ...] | None:
+def _fetch_mysql(driver: ModuleType, target: DatabaseTarget, query: str, seconds: int) -> tuple[Any, ...] | None:
     conn = driver.connect(
         host=target.host,
         port=target.port or 3306,
@@ -183,9 +172,7 @@ def _fetch_mysql(
     return None if row is None else tuple(row)
 
 
-def _fetch_postgres(
-    driver: ModuleType, target: DatabaseTarget, query: str, seconds: int
-) -> tuple[Any, ...] | None:
+def _fetch_postgres(driver: ModuleType, target: DatabaseTarget, query: str, seconds: int) -> tuple[Any, ...] | None:
     conn = driver.connect(
         host=target.host,
         port=target.port or 5432,

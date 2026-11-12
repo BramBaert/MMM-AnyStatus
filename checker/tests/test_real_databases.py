@@ -58,16 +58,14 @@ MARIADB = Flavour(
     "mariadb",
     "ANYSTATUS_TEST_MARIADB",
     "mariadb",
-    "CREATE TABLE {t} (finished_at DATETIME NULL, stamp TIMESTAMP NULL, unix_s BIGINT NULL, "
-    "amount DECIMAL(10,2) NULL, label VARCHAR(20) NULL)",
+    "CREATE TABLE {t} (finished_at DATETIME NULL, stamp TIMESTAMP NULL, unix_s BIGINT NULL, amount DECIMAL(10,2) NULL, label VARCHAR(20) NULL)",
     "READ ONLY",
 )
 POSTGRES = Flavour(
     "postgres",
     "ANYSTATUS_TEST_POSTGRES",
     "postgresql",
-    "CREATE TABLE {t} (finished_at timestamp NULL, stamp timestamptz NULL, unix_s bigint NULL, "
-    "amount numeric(10,2) NULL, label varchar(20) NULL)",
+    "CREATE TABLE {t} (finished_at timestamp NULL, stamp timestamptz NULL, unix_s bigint NULL, amount numeric(10,2) NULL, label varchar(20) NULL)",
     "read-only",
 )
 FLAVOURS = [
@@ -106,9 +104,7 @@ class Server:
             )
         import psycopg
 
-        return psycopg.connect(
-            host=self.host, port=self.port, user=USER, password=PASSWORD, dbname=DATABASE, autocommit=True
-        )
+        return psycopg.connect(host=self.host, port=self.port, user=USER, password=PASSWORD, dbname=DATABASE, autocommit=True)
 
     def sql(self, statement: str) -> None:
         with self.conn.cursor() as cur:
@@ -123,9 +119,7 @@ class Server:
     def url(self) -> str:
         return f"{self.flavour.scheme}://{USER}@{self.host}:{self.port}/{DATABASE}"
 
-    def spec(
-        self, kind: str, query: str, extra: str = "", password: str = PASSWORD, url: str = ""
-    ) -> CheckSpec:
+    def spec(self, kind: str, query: str, extra: str = "", password: str = PASSWORD, url: str = "") -> CheckSpec:
         query = query.format(t=self.table).replace('"', '\\"')
         text = f"""
 [[check]]
@@ -140,16 +134,13 @@ query = "{query}"
 
 
 @pytest.fixture
-def server(
-    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Server]:
+def server(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Server]:
     monkeypatch.setattr(sql_age, "_now", lambda: NOW)
     srv = Server(request.param, tmp_path)
     srv.conn = srv.connect()
     srv.sql(srv.flavour.create)
     srv.sql(
-        "INSERT INTO {t} (finished_at, stamp, unix_s, amount, label) "
-        "VALUES ('2026-11-11 09:00:00', '2026-11-11 09:00:00', 1794387600, 12.50, 'abc')"
+        "INSERT INTO {t} (finished_at, stamp, unix_s, amount, label) VALUES ('2026-11-11 09:00:00', '2026-11-11 09:00:00', 1794387600, 12.50, 'abc')"
     )
     try:
         yield srv
@@ -174,9 +165,7 @@ def run(spec: CheckSpec) -> tuple[Any, Any]:
 def test_naive_datetime_is_utc_unless_timezone_says_otherwise(server: Server) -> None:
     query = "SELECT max(finished_at) FROM {t}"
     assert run(server.spec("sql_age", query))[1].value == 1.5  # 09:00 read as UTC
-    outcome, core = run(
-        server.spec("sql_age", query, 'timezone = "Europe/Brussels"')
-    )  # 09:00 Brussels = 08:00Z
+    outcome, core = run(server.spec("sql_age", query, 'timezone = "Europe/Brussels"'))  # 09:00 Brussels = 08:00Z
     assert isinstance(outcome, Reading)
     assert (core.value, core.unit, core.summary) == (2.5, "h", "newest entry 2.5 h ago")
     assert outcome.fields["newest"] == "2026-11-11 09:00"
@@ -186,9 +175,7 @@ def test_naive_datetime_is_utc_unless_timezone_says_otherwise(server: Server) ->
 def test_other_timestamp_columns(server: Server) -> None:
     # TIMESTAMP (MariaDB) / timestamptz (PostgreSQL), written without an offset in the server's UTC session
     assert run(server.spec("sql_age", "SELECT max(stamp) FROM {t}"))[1].value == 1.5
-    assert (
-        run(server.spec("sql_age", "SELECT max(unix_s) FROM {t}"))[1].value == 1.5
-    )  # Unix seconds in a bigint
+    assert run(server.spec("sql_age", "SELECT max(unix_s) FROM {t}"))[1].value == 1.5  # Unix seconds in a bigint
     assert run(server.spec("sql_age", "SELECT '2026-11-11T10:00:00+01:00'"))[1].value == 1.5  # RFC 3339 text
 
 
@@ -222,13 +209,8 @@ def test_sql_value_numbers(server: Server) -> None:
 
 @on_both
 def test_sql_value_empty_and_wrong_shapes(server: Server) -> None:
-    assert run(server.spec("sql_value", "SELECT sum(amount) FROM {t} WHERE 1 = 0"))[0] == Observation(
-        level="crit", summary="no rows"
-    )
-    assert (
-        run(server.spec("sql_value", "SELECT amount FROM {t} WHERE 1 = 0", 'empty = "warn"'))[1].level
-        == "warn"
-    )
+    assert run(server.spec("sql_value", "SELECT sum(amount) FROM {t} WHERE 1 = 0"))[0] == Observation(level="crit", summary="no rows")
+    assert run(server.spec("sql_value", "SELECT amount FROM {t} WHERE 1 = 0", 'empty = "warn"'))[1].level == "warn"
     outcome = execute(server.spec("sql_value", "SELECT label FROM {t}"))
     assert outcome == Failure("the query's value is not a number")
     outcome = execute(server.spec("sql_value", "SELECT amount, label FROM {t}"))

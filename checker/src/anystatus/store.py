@@ -91,9 +91,7 @@ class Store:
     def load_extra(self) -> dict[str, tuple[dict[str, Any], datetime]]:
         """The type-specific data of every check, with when it was written."""
         with self._lock:
-            rows = self.conn.execute(
-                "SELECT id, extra, extra_updated FROM checks WHERE extra IS NOT NULL"
-            ).fetchall()
+            rows = self.conn.execute("SELECT id, extra, extra_updated FROM checks WHERE extra IS NOT NULL").fetchall()
         out: dict[str, tuple[dict[str, Any], datetime]] = {}
         for check_id, extra, written in rows:
             try:
@@ -115,9 +113,7 @@ class Store:
             )
 
 
-def _decode(
-    result: str, since: str, cand_level: str | None, cand_count: int, cand_since: str | None
-) -> Reported:
+def _decode(result: str, since: str, cand_level: str | None, cand_count: int, cand_since: str | None) -> Reported:
     doc: dict[str, Any] = json.loads(result)
     level = doc["level"]
     if level not in LEVELS:

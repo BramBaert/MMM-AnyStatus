@@ -110,8 +110,7 @@ class DockerUpdates(Check):
     def from_config(cls, table: Table) -> DockerUpdates:
         if table.has("crit"):
             table.error(
-                "docker_updates is never critical (an update is 'do it this weekend'): 'crit' is not used. "
-                "image_vulns is the check that turns red"
+                "docker_updates is never critical (an update is 'do it this weekend'): 'crit' is not used. image_vulns is the check that turns red"
             )
         if table.has("worse"):
             table.error("docker_updates: 'worse' is not used")
@@ -180,19 +179,13 @@ class DockerUpdates(Check):
             names = _names(updates)
         else:
             current = len(considered) - len(unknown)
-            text = (
-                f"all {current} image{'s' if current != 1 else ''} up to date"
-                if current
-                else "no images to check"
-            )
+            text = f"all {current} image{'s' if current != 1 else ''} up to date" if current else "no images to check"
             names = ""
         if notes:
             text += "; " + "; ".join(notes)
         return Reading(value=float(len(updates)), text=text, fields={"names": names})
 
-    def _check_image(
-        self, image: RunningImage, registry: RegistryClient, left: Callable[[], float]
-    ) -> _Verdict:
+    def _check_image(self, image: RunningImage, registry: RegistryClient, left: Callable[[], float]) -> _Verdict:
         reference = image.reference
         try:
             if not reference:  # the container shows only an id: use a tag the image has

@@ -121,9 +121,7 @@ def make_world(
     clock = clock or FakeClock()
     launcher = FakeLauncher(clock=clock)
     snapshot = Snapshot(config.name)
-    sched = Scheduler(
-        config.checks, clock=clock, launcher=launcher, snapshot=snapshot, store=store, spread=spread
-    )
+    sched = Scheduler(config.checks, clock=clock, launcher=launcher, snapshot=snapshot, store=store, spread=spread)
     if start:
         sched.start()
     return World(config, clock, launcher, snapshot, sched)

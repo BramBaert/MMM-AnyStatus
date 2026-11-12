@@ -21,9 +21,7 @@ from anystatus.table import ConfigError
 BASE_ENV = ["SYSTEMROOT"]
 
 
-def spec_for(
-    tmp_path: Path, script: str, *, args: tuple[str, ...] = (), extra: str = "", env: list[str] | None = None
-):  # type: ignore[no-untyped-def]
+def spec_for(tmp_path: Path, script: str, *, args: tuple[str, ...] = (), extra: str = "", env: list[str] | None = None):  # type: ignore[no-untyped-def]
     path = tmp_path / "plugin.py"
     path.write_text(script, encoding="utf-8")
     command = json.dumps([sys.executable, str(path), *args])
@@ -105,10 +103,7 @@ def test_stderr_goes_to_the_debug_log_masked_and_never_into_the_summary(
 ) -> None:
     monkeypatch.setenv("ANYSTATUS_TEST_TOKEN", "hunter2-token")
     script = (
-        "import os, sys\n"
-        "sys.stderr.write('trouble with ' + os.environ['ANYSTATUS_TEST_TOKEN'] + '\\n')\n"
-        "print('WARNING: degraded')\n"
-        "sys.exit(1)\n"
+        "import os, sys\nsys.stderr.write('trouble with ' + os.environ['ANYSTATUS_TEST_TOKEN'] + '\\n')\nprint('WARNING: degraded')\nsys.exit(1)\n"
     )
     spec = spec_for(tmp_path, script, env=["ANYSTATUS_TEST_TOKEN"])
     with caplog.at_level(logging.DEBUG, logger="anystatus"):
@@ -118,9 +113,7 @@ def test_stderr_goes_to_the_debug_log_masked_and_never_into_the_summary(
     assert "hunter2" not in caplog.text
 
 
-def test_stderr_of_a_failing_plugin_stays_out_of_the_summary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_stderr_of_a_failing_plugin_stays_out_of_the_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANYSTATUS_TEST_TOKEN", "hunter2-token")
     script = "import sys\nsys.stderr.write('password is hunter2-token')\nsys.exit(9)\n"
     outcome = execute(spec_for(tmp_path, script, env=["ANYSTATUS_TEST_TOKEN"]))
@@ -129,9 +122,7 @@ def test_stderr_of_a_failing_plugin_stays_out_of_the_summary(
     assert "hunter2" not in outcome.summary
 
 
-def test_only_the_listed_environment_variables_are_passed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_only_the_listed_environment_variables_are_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANYSTATUS_TEST_A", "alpha")
     monkeypatch.setenv("ANYSTATUS_TEST_B", "bravo")
     script = "import json, os\nprint(json.dumps(dict(os.environ)))\n"
@@ -142,9 +133,7 @@ def test_only_the_listed_environment_variables_are_passed(
     assert seen["ANYSTATUS_TEST_A"] == "alpha"
     assert "ANYSTATUS_TEST_B" not in seen  # set here, not listed
     assert "ANYSTATUS_TEST_NOT_SET" not in seen  # listed, not set
-    assert (
-        "PATH" not in seen and "HOME" not in seen and "USERPROFILE" not in seen
-    )  # nothing else, PATH included
+    assert "PATH" not in seen and "HOME" not in seen and "USERPROFILE" not in seen  # nothing else, PATH included
 
 
 def test_path_is_passed_only_when_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,9 +145,7 @@ def test_path_is_passed_only_when_listed(tmp_path: Path, monkeypatch: pytest.Mon
 
 def alive(pid: int) -> bool:
     if sys.platform == "win32":
-        out = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False
-        ).stdout
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, check=False).stdout
         return str(pid) in out.split()
     try:
         os.kill(pid, 0)
@@ -169,12 +156,7 @@ def alive(pid: int) -> bool:
 
 def test_a_timeout_kills_the_process(tmp_path: Path) -> None:
     pid_file = tmp_path / "pid"
-    script = (
-        "import os, time\n"
-        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
-        "time.sleep(60)\n"
-        "print('too late')\n"
-    )
+    script = f"import os, time\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)\nprint('too late')\n"
     spec = spec_for(tmp_path, script)
     started = time.monotonic()
     with pytest.raises(CheckFailure) as caught:
@@ -208,9 +190,7 @@ def test_the_output_is_capped(tmp_path: Path) -> None:
 
 
 def test_a_missing_program_is_a_failure(tmp_path: Path) -> None:
-    spec = parse(
-        '[[check]]\nid = "x"\ntype = "exec"\ncommand = ["/no/such/anystatus-plugin"]\n', tmp_path
-    ).checks[0]
+    spec = parse('[[check]]\nid = "x"\ntype = "exec"\ncommand = ["/no/such/anystatus-plugin"]\n', tmp_path).checks[0]
     outcome = execute(spec)
     assert isinstance(outcome, Failure) and outcome.summary == "command not found"
 

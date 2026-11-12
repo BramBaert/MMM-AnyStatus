@@ -18,9 +18,7 @@ from anystatus.scheduler import execute
 from anystatus.store import Store
 from anystatus.table import ConfigError
 
-SCHEMA = json.loads(
-    (Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8")
-)
+SCHEMA = json.loads((Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8"))
 TS = "2026-11-11T11:59:00Z"  # a minute before the fake clock's start (12:00:00)
 CHECK = 'id = "jobs"\ntype = "result_file"\npath = "r.json"\ninterval = "1m"\n'  # ttl: 3 x 1 min = 180 s
 
@@ -148,9 +146,7 @@ def test_a_document_with_a_higher_minor_version_is_fine(tmp_path: Path) -> None:
 
 def test_an_empty_document_is_unknown(tmp_path: Path) -> None:
     results = served(tmp_path, doc())
-    assert [(r["id"], r["level"], r["summary"]) for r in results] == [
-        ("jobs", "unknown", "invalid in file: no results")
-    ]
+    assert [(r["id"], r["level"], r["summary"]) for r in results] == [("jobs", "unknown", "invalid in file: no results")]
 
 
 # not debounced, not re-stamped
@@ -161,9 +157,7 @@ def test_the_level_is_not_debounced_and_ts_is_not_restamped(tmp_path: Path) -> N
     write(tmp_path, res(level="ok", ts="2026-11-11T11:59:30Z"))
     first = run_once(w)[0]
     assert first["level"] == "ok"
-    write(
-        tmp_path, res(level="crit", summary="broke", ts="2026-11-11T11:59:40Z", since="2026-11-11T11:59:40Z")
-    )
+    write(tmp_path, res(level="crit", summary="broke", ts="2026-11-11T11:59:40Z", since="2026-11-11T11:59:40Z"))
     second = run_once(w)[0]
     assert (second["level"], second["summary"]) == ("crit", "broke")  # at once, although confirm = 3
     assert (second["since"], second["ts"]) == ("2026-11-11T11:59:40Z", "2026-11-11T11:59:40Z")
@@ -209,9 +203,7 @@ BAD: list[tuple[str, dict[str, Any], str]] = [
 
 
 @pytest.mark.parametrize(("name", "entry", "reason"), BAD, ids=[b[0] for b in BAD])
-def test_an_invalid_result_in_a_document_is_unknown_under_its_id(
-    tmp_path: Path, name: str, entry: dict[str, Any], reason: str
-) -> None:
+def test_an_invalid_result_in_a_document_is_unknown_under_its_id(tmp_path: Path, name: str, entry: dict[str, Any], reason: str) -> None:
     results = served(tmp_path, doc(res(id="good"), entry))
     assert [r["id"] for r in results] == ["jobs/good", "jobs/a"]
     assert results[0]["level"] == "ok"  # the others are not harmed
@@ -224,9 +216,7 @@ def test_an_invalid_result_in_a_document_is_unknown_under_its_id(
 
 
 @pytest.mark.parametrize(("name", "entry", "reason"), BAD, ids=[b[0] for b in BAD])
-def test_an_invalid_single_result_is_unknown_under_the_checks_id(
-    tmp_path: Path, name: str, entry: dict[str, Any], reason: str
-) -> None:
+def test_an_invalid_single_result_is_unknown_under_the_checks_id(tmp_path: Path, name: str, entry: dict[str, Any], reason: str) -> None:
     results = served(tmp_path, entry)
     assert len(results) == 1 and results[0]["id"] == "jobs"
     assert results[0]["summary"].startswith(f"invalid in file: {reason}")
@@ -234,9 +224,7 @@ def test_an_invalid_single_result_is_unknown_under_the_checks_id(
 
 
 def test_nan_and_infinity_are_invalid_not_served(tmp_path: Path) -> None:
-    entry = (
-        json.dumps(res(ttl=60))[:-1] + ', "value": NaN}'
-    )  # json.dumps never writes NaN as it is not valid JSON
+    entry = json.dumps(res(ttl=60))[:-1] + ', "value": NaN}'  # json.dumps never writes NaN as it is not valid JSON
     text = '{"spec": "1.0", "results": [' + entry + "]}"
     results = served(tmp_path, text)
     assert results[0]["summary"] == "invalid in file: bad value"
@@ -250,9 +238,7 @@ def test_an_entry_that_is_not_an_object(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("entry", [res(id=None), res(id=5), res(id="-starts-with-dash"), res(id="has space")])
-def test_an_entry_without_a_usable_id_is_unknown_under_the_checks_id(
-    tmp_path: Path, entry: dict[str, Any]
-) -> None:
+def test_an_entry_without_a_usable_id_is_unknown_under_the_checks_id(tmp_path: Path, entry: dict[str, Any]) -> None:
     results = served(tmp_path, doc(res(id="good"), entry))
     assert [r["id"] for r in results] == ["jobs/good", "jobs"]
     assert results[1]["level"] == "unknown" and results[1]["summary"].startswith("invalid in file: ")
@@ -466,9 +452,7 @@ def test_a_restart_waits_for_the_first_run_and_then_reads_the_file_again(tmp_pat
 
     clock2 = FakeClock(clock.now() + timedelta(seconds=30))
     store2 = Store(tmp_path / "m.sqlite")
-    w2 = make_world(
-        MIX, tmp_path, store=store2, clock=clock2
-    )  # prunes: must not trip over the passthrough checks
+    w2 = make_world(MIX, tmp_path, store=store2, clock=clock2)  # prunes: must not trip over the passthrough checks
     waiting = {r["id"]: r for r in w2.sched.results()}
     assert waiting["docs"]["summary"] == "waiting for the first run"
     assert waiting["first"]["summary"] == "fine"  # the others continue from the memory
@@ -486,9 +470,7 @@ def test_the_memory_keeps_nothing_of_a_passthrough_check_after_it_failed_once(tm
     run_once(w)
     assert w.sched.results()[0]["id"] == "jobs/x"
     store.close()
-    w2 = world(
-        tmp_path, store=Store(tmp_path / "m.sqlite")
-    )  # the next start prunes and loads without a problem
+    w2 = world(tmp_path, store=Store(tmp_path / "m.sqlite"))  # the next start prunes and loads without a problem
     assert w2.sched.results()[0]["id"] == "jobs"
 
 

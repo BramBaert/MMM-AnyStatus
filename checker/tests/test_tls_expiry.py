@@ -65,9 +65,7 @@ def tls_server(cert: str) -> Iterator[int]:
 
 def trust(monkeypatch: pytest.MonkeyPatch, cert: str) -> None:
     """Judge certificates against tests/certs/<cert>.pem instead of the system's CAs, and fix the clock."""
-    monkeypatch.setattr(
-        tls_expiry, "trusted_context", lambda: ssl.create_default_context(cafile=str(CERTS / f"{cert}.pem"))
-    )
+    monkeypatch.setattr(tls_expiry, "trusted_context", lambda: ssl.create_default_context(cafile=str(CERTS / f"{cert}.pem")))
     monkeypatch.setattr(tls_expiry, "_now", lambda: NOW)
 
 
@@ -77,10 +75,7 @@ def trust(monkeypatch: pytest.MonkeyPatch, cert: str) -> None:
 def test_default_limits_are_21_and_7_days_below(tmp_path: Path) -> None:
     spec = spec_for(tmp_path)
     assert (spec.limits.warn, spec.limits.crit, spec.limits.worse) == (21, 7, "below")
-    levels = {
-        days: judge(spec, TlsExpiry("h", 443, "h").reading(days)).level
-        for days in (60, 21.5, 21, 8, 7, 0, -3)
-    }
+    levels = {days: judge(spec, TlsExpiry("h", 443, "h").reading(days)).level for days in (60, 21.5, 21, 8, 7, 0, -3)}
     assert levels == {60: "ok", 21.5: "ok", 21: "warn", 8: "warn", 7: "crit", 0: "crit", -3: "crit"}
 
 
@@ -97,9 +92,7 @@ def test_limits_can_be_changed(tmp_path: Path) -> None:
 
 def test_the_reading_says_days_and_goes_negative_when_expired() -> None:
     check = TlsExpiry("www.example.org", 443, "www.example.org")
-    assert check.reading(52.34) == Reading(
-        value=52.3, unit="d", text="expires in 52.3 days", fields={"host": "www.example.org"}
-    )
+    assert check.reading(52.34) == Reading(value=52.3, unit="d", text="expires in 52.3 days", fields={"host": "www.example.org"})
     assert check.reading(-2.5).value == -2.5
     assert check.reading(-2.5).text == "expired 2.5 days ago"
 
@@ -188,9 +181,7 @@ def test_untrusted_certificate_is_crit_with_a_short_reason(tmp_path: Path) -> No
     assert judge(spec, outcome).level == "crit"
 
 
-def test_expired_certificate_is_crit_and_says_how_long_ago(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_expired_certificate_is_crit_and_says_how_long_ago(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     trust(monkeypatch, "expired")
     with tls_server("expired") as port:
         spec = spec_for(tmp_path, f'port = {port}\nservername = "localhost"')

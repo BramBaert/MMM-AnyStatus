@@ -30,9 +30,7 @@ class _Server:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.httpd.server_address[1]
-        self.thread = threading.Thread(
-            target=self.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
-        )
+        self.thread = threading.Thread(target=self.httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
 
     def close(self) -> None:
@@ -47,9 +45,7 @@ class _Server:
         self.close()
 
 
-def _send(
-    handler: BaseHTTPRequestHandler, status: int, body: bytes = b"", headers: dict[str, str] | None = None
-) -> None:
+def _send(handler: BaseHTTPRequestHandler, status: int, body: bytes = b"", headers: dict[str, str] | None = None) -> None:
     handler.send_response(status)
     for key, value in (headers or {}).items():
         handler.send_header(key, value)
@@ -78,9 +74,7 @@ class _DockerHandler(BaseHTTPRequestHandler):
         query = parse_qs(parts.query)
         segments = parts.path.strip("/").split("/")
         if parts.path == "/containers/json":
-            listing = o.list_containers(
-                all_=query.get("all") == ["true"], filters=json.loads(query.get("filters", ["{}"])[0])
-            )
+            listing = o.list_containers(all_=query.get("all") == ["true"], filters=json.loads(query.get("filters", ["{}"])[0]))
             _send(self, 200, json.dumps(listing).encode(), {"Content-Type": "application/json"})
         elif len(segments) == 3 and segments[0] == "containers" and segments[2] == "json":
             info = o.inspect.get(segments[1])
@@ -128,10 +122,7 @@ class FakeDocker(_Server):
                 continue
             labels = item.get("Labels") or {}
             if not all(
-                (
-                    want.split("=")[0] in labels
-                    and (("=" not in want) or labels[want.split("=")[0]] == want.split("=", 1)[1])
-                )
+                (want.split("=")[0] in labels and (("=" not in want) or labels[want.split("=")[0]] == want.split("=", 1)[1]))
                 for want in filters.get("label", [])
             ):
                 continue
@@ -269,9 +260,7 @@ class _RegistryHandler(BaseHTTPRequestHandler):
             _send(self, o.status)
             return
         if o.require_auth and auth != f"Bearer {o.token}":
-            challenge = (
-                f'Bearer realm="{o.realm or f"http://127.0.0.1:{o.port}/token"}",service="fake-registry"'
-            )
+            challenge = f'Bearer realm="{o.realm or f"http://127.0.0.1:{o.port}/token"}",service="fake-registry"'
             repo = repo_path.split("/manifests/")[0].split("/tags/")[0]
             _send(self, 401, b"{}", {"WWW-Authenticate": f'{challenge},scope="repository:{repo}:pull"'})
             return
@@ -302,9 +291,7 @@ class _RegistryHandler(BaseHTTPRequestHandler):
             chunk = tags[start : start + o.page_size] if o.page_size else tags
             headers = {}
             if o.page_size and start + o.page_size < len(tags):
-                headers["Link"] = (
-                    f'</v2/{repo}/tags/list?last={start + o.page_size}&n={o.page_size}>; rel="next"'
-                )
+                headers["Link"] = f'</v2/{repo}/tags/list?last={start + o.page_size}&n={o.page_size}>; rel="next"'
             _send(self, 200, json.dumps({"name": repo, "tags": chunk}).encode(), headers)
             return
         _send(self, 404)
@@ -316,9 +303,7 @@ class FakeRegistry(_Server):
     handler = _RegistryHandler
 
     def __init__(self) -> None:
-        self.manifests: dict[
-            tuple[str, str], dict[str, str]
-        ] = {}  # (repo, tag) -> {"index": ..., "manifest": ...}
+        self.manifests: dict[tuple[str, str], dict[str, str]] = {}  # (repo, tag) -> {"index": ..., "manifest": ...}
         self.tags: dict[str, list[str]] = {}
         self.page_size = 0  # 0: one page
         self.status: int | None = None  # answer every /v2/ request with this status (a registry that is down)

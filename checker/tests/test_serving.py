@@ -12,9 +12,7 @@ from helpers import make_world
 from anystatus.model import Failure, Observation, Reading
 from anystatus.server import ResultsServer
 
-SCHEMA = json.loads(
-    (Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8")
-)
+SCHEMA = json.loads((Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8"))
 
 CFG = """
 [checker]

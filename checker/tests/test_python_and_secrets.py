@@ -59,9 +59,7 @@ def test_config_errors(tmp_path: Path) -> None:
             parse(text, tmp_path)
 
 
-def test_secret_never_reaches_a_failure_summary_or_the_log(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_secret_never_reaches_a_failure_summary_or_the_log(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     text = """
 [[check]]
 id = "p"
@@ -82,9 +80,7 @@ key_env = "MY_KEY"
 
 
 def test_masking_and_exception_descriptions() -> None:
-    assert (
-        mask("login failed for postgresql://u:hunter2@h/db", []) == "login failed for postgresql://u:***@h/db"
-    )
+    assert mask("login failed for postgresql://u:hunter2@h/db", []) == "login failed for postgresql://u:***@h/db"
     assert mask("token abc123 used", ["abc123"]) == "token *** used"
     assert describe_exception(ConnectionRefusedError("host=db password=hunter2")) == "connection refused"
     assert describe_exception(RuntimeError("password=hunter2")) == "error: RuntimeError"

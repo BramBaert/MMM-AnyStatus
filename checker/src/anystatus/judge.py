@@ -113,6 +113,4 @@ def step(prev: Reported | None, new: Core, ts: datetime, confirm: int) -> Report
         count, started = 1, ts
     if count >= confirm:
         return Reported(core=new, ts=ts, since=started)
-    return Reported(
-        core=prev.core, ts=ts, since=prev.since, cand_level=new.level, cand_count=count, cand_since=started
-    )
+    return Reported(core=prev.core, ts=ts, since=prev.since, cand_level=new.level, cand_count=count, cand_since=started)

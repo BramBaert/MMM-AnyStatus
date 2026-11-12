@@ -124,9 +124,7 @@ class ImageVulns(Check):
             severities = list(DEFAULT_SEVERITIES)
         env_names = table.str_list("env") or []
         if not table.has("timeout"):
-            table.warning(
-                'image_vulns: the default timeout of 10 s is too short for Trivy: set timeout = "15m"'
-            )
+            table.warning('image_vulns: the default timeout of 10 s is too short for Trivy: set timeout = "15m"')
         return cls(endpoint, trivy, cache_dir, severities, env_names)
 
     def _environment(self) -> dict[str, str]:
@@ -167,9 +165,7 @@ class ImageVulns(Check):
                     failed.extend(i.reference or i.image_id[:19] for i in images[images.index(image) + 1 :])
                     break
         if not scans:
-            raise CheckFailure(
-                first_failure if timed_out or len(images) == 1 else f"trivy failed: {first_failure}"
-            )
+            raise CheckFailure(first_failure if timed_out or len(images) == 1 else f"trivy failed: {first_failure}")
 
         counted = set(self.severities)
         per_image = [_Scan(s.image, [v for v in s.vulns if v.severity in counted]) for s in scans]
@@ -183,15 +179,9 @@ class ImageVulns(Check):
             noun = "image" if len(scans) == 1 else "images"
             text = f"no fixable vulnerabilities in {len(scans)} {noun}"
         else:
-            level = (
-                "crit" if "CRITICAL" in counted and any(s.count("CRITICAL") for s in per_image) else "warn"
-            )
+            level = "crit" if "CRITICAL" in counted and any(s.count("CRITICAL") for s in per_image) else "warn"
             worst = affected[0]
-            parts = [
-                f"{worst.count(sev)} {sev.lower()}"
-                for sev in SEVERITIES
-                if sev in counted and worst.count(sev)
-            ]
+            parts = [f"{worst.count(sev)} {sev.lower()}" for sev in SEVERITIES if sev in counted and worst.count(sev)]
             text = f"{worst.image}: {', '.join(parts)}"
             top = next(sev for sev in SEVERITIES if worst.count(sev))
             fixes = {v.fixed for v in worst.vulns if v.severity == top}

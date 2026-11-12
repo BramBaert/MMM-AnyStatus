@@ -63,9 +63,7 @@ def test_a_run_that_times_out_is_a_failure_and_the_hung_thread_is_not_restarted(
 ) -> None:
     w = one_check('timeout = "10s"\nconfirm = 1')
     w.sched.tick()  # started, and never returns
-    w.clock.advance(
-        10 + HUNG_GRACE - 0.1
-    )  # the check's own timeout passed; it gets a grace to report it itself
+    w.clock.advance(10 + HUNG_GRACE - 0.1)  # the check's own timeout passed; it gets a grace to report it itself
     w.sched.tick()
     assert w.result("c")["summary"] == "waiting for the first run"
     w.clock.advance(0.2)
@@ -123,9 +121,7 @@ timeout = "5s"
 
     config = parse(text, tmp_path)
     snapshot = Snapshot("t")
-    sched = Scheduler(
-        config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, spread=0
-    )
+    sched = Scheduler(config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=snapshot, spread=0)
     sched.start()
     try:
         sched.tick()
@@ -159,9 +155,7 @@ def test_a_real_run_finishes_through_the_thread_launcher(tmp_path: Path) -> None
     )
     clock = FakeClock()
     wake = threading.Event()
-    sched = Scheduler(
-        config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=Snapshot("t"), spread=0
-    )
+    sched = Scheduler(config.checks, clock=clock, launcher=ThreadLauncher(clock, wake), snapshot=Snapshot("t"), spread=0)
     sched.start()
     sched.tick()
     assert wake.wait(5)

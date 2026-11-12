@@ -25,9 +25,7 @@ from anystatus.table import Table
 class PythonCheck(Check):
     type_name = "python"
 
-    def __init__(
-        self, function: Callable[[dict[str, Any]], Any], settings: dict[str, Any], name: str
-    ) -> None:
+    def __init__(self, function: Callable[[dict[str, Any]], Any], settings: dict[str, Any], name: str) -> None:
         self.function = function
         self.settings = settings
         self.name = name
@@ -46,9 +44,7 @@ class PythonCheck(Check):
             if inspect.isawaitable(result):
                 result = asyncio.run(_await(result))
         except Exception as exc:
-            raise CheckFailure(
-                f"function raised {type(exc).__name__}", detail=traceback.format_exc()
-            ) from exc
+            raise CheckFailure(f"function raised {type(exc).__name__}", detail=traceback.format_exc()) from exc
         if isinstance(result, Observation):
             return result
         if isinstance(result, int | float) and not isinstance(result, bool):

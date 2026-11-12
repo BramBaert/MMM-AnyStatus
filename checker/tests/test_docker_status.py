@@ -76,9 +76,7 @@ def test_unhealthy_is_crit_and_starting_is_fine(tmp_path: Path, docker: FakeDock
     assert (core.level, core.value, core.summary) == ("crit", 1, "stack-demo-1: unhealthy")
 
 
-def test_default_ignores_stopped_containers_but_a_paused_listed_one_is_crit(
-    tmp_path: Path, docker: FakeDocker
-) -> None:
+def test_default_ignores_stopped_containers_but_a_paused_listed_one_is_crit(tmp_path: Path, docker: FakeDocker) -> None:
     docker.set_state("stack-demo-1", status="paused")
     _, core = run(build(tmp_path, docker, 'containers = ["stack-demo-1"]'))
     assert core.level == "crit" and core.summary == "stack-demo-1: not running (paused)"
@@ -92,16 +90,7 @@ def test_labels_select_containers(tmp_path: Path, docker: FakeDocker) -> None:
     watched = [p for m, p in docker.requests if p.startswith("/containers/json")]
     assert any("filters=" in p and "status.watch" in p for p in watched)
     # the inspect calls only covered the watched container
-    assert (
-        len(
-            [
-                p
-                for _, p in docker.requests
-                if p.endswith("/json") and "/containers/" in p and "json?" not in p
-            ]
-        )
-        == 1
-    )
+    assert len([p for _, p in docker.requests if p.endswith("/json") and "/containers/" in p and "json?" not in p]) == 1
 
 
 def test_no_matching_container_is_fine(tmp_path: Path, docker: FakeDocker) -> None:
@@ -153,9 +142,7 @@ def test_the_history_survives_a_restart_of_the_checker(tmp_path: Path, docker: F
     assert memory.data is not None  # saved after the run
 
     docker.set_state("stack-demo-1", restarts=6)
-    again = build(
-        tmp_path, docker, "restarts = 3"
-    ).check  # a new process: the instance is new, the memory is not
+    again = build(tmp_path, docker, "restarts = 3").check  # a new process: the instance is new, the memory is not
     again.start(Memory(memory.data))
     again._now = lambda: T0 + 1800
     result = again.run(10)
@@ -272,9 +259,7 @@ def test_endpoints() -> None:
 # --- the client
 
 
-def test_the_client_only_ever_sends_get(
-    tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_client_only_ever_sends_get(tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[str] = []
     original = http.client.HTTPConnection.request
 

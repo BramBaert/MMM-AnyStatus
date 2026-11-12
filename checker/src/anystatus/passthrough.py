@@ -20,9 +20,7 @@ if TYPE_CHECKING:
     from anystatus.config import CheckSpec
 
 # The schema's `time`: RFC 3339 with an explicit offset (fractions allowed).
-_TIME = re.compile(
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})"
-)
+_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})")
 MAX_REASON = 120
 
 
@@ -53,9 +51,7 @@ def _text(raw: dict[str, Any], key: str, *, allow_empty: bool) -> str | None:
     return value
 
 
-def _valid_result(
-    raw: dict[str, Any], spec: CheckSpec, result_id: str, default_label: str
-) -> dict[str, Any] | str:
+def _valid_result(raw: dict[str, Any], spec: CheckSpec, result_id: str, default_label: str) -> dict[str, Any] | str:
     """The result as it will be served, or the reason it is invalid."""
     ts = _time(raw.get("ts"))
     if "ts" not in raw:
@@ -105,9 +101,7 @@ def _valid_result(
     return result
 
 
-def _invalid(
-    spec: CheckSpec, result_id: str, reason: str, read_at: str, label: str | None = None
-) -> dict[str, Any]:
+def _invalid(spec: CheckSpec, result_id: str, reason: str, read_at: str, label: str | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"id": result_id, "label": label or spec.label}
     if spec.group:
         result["group"] = spec.group

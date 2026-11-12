@@ -49,9 +49,7 @@ class FileAge(Check):
     def from_config(cls, table: Table) -> FileAge:
         text = table.req_str("path")
         # A relative pattern is relative to the config file; the folder itself is never read as a pattern.
-        pattern = (
-            text if not text or Path(text).is_absolute() else glob.escape(str(table.base_dir)) + os.sep + text
-        )
+        pattern = text if not text or Path(text).is_absolute() else glob.escape(str(table.base_dir)) + os.sep + text
         min_size = 0
         if table.has("min_size"):
             try:

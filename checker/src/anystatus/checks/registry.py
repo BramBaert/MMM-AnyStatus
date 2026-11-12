@@ -50,9 +50,7 @@ class RegistryError(Exception):
 
 @dataclass(frozen=True)
 class ImageRef:
-    registry: (
-        str  # the host (with a port if there is one) that serves the API; Docker Hub is registry-1.docker.io
-    )
+    registry: str  # the host (with a port if there is one) that serves the API; Docker Hub is registry-1.docker.io
     repository: str  # "library/nginx"
     tag: str | None = None
     digest: str | None = None  # an `@sha256:` reference: pinned on purpose
@@ -79,11 +77,7 @@ def parse_image(reference: str) -> ImageRef:
     head, colon, after = path.rpartition(":")
     if colon and "/" not in after:
         path, tag = head, after
-    if (
-        tag == ""
-        or not path
-        or not re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*", path)
-    ):
+    if tag == "" or not path or not re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*", path):
         raise ValueError("not an image name")
     if registry in _HUB_ALIASES:
         registry = HUB_REGISTRY
@@ -195,9 +189,7 @@ class RegistryClient:
         finally:
             conn.close()
 
-    def _request(
-        self, method: str, ref: ImageRef, path: str, accept: str, need_body: bool = False
-    ) -> tuple[int, dict[str, str], bytes]:
+    def _request(self, method: str, ref: ImageRef, path: str, accept: str, need_body: bool = False) -> tuple[int, dict[str, str], bytes]:
         host = ref.registry
         scope = f"repository:{ref.repository}:pull"
         headers = {"Accept": accept}
@@ -215,9 +207,7 @@ class RegistryClient:
             self._tokens[(host, scope)] = token
             headers["Authorization"] = f"Bearer {token}"
         elif scheme == "basic" and host in self._credentials:
-            headers["Authorization"] = "Basic " + base64.b64encode(self._credentials[host].encode()).decode(
-                "ascii"
-            )
+            headers["Authorization"] = "Basic " + base64.b64encode(self._credentials[host].encode()).decode("ascii")
         else:
             raise RegistryError("registry requires credentials (see registry_auth_env)")
         status, response_headers, body = self._once(method, host, path, headers, need_body)
@@ -243,9 +233,7 @@ class RegistryClient:
         path = realm.path + "?" + urlencode(query)
         status, _, body = self._once("GET", realm.netloc, path, headers, need_body=True)
         if status in (401, 403):
-            raise RegistryError(
-                "registry refused the credentials" if secret else "registry requires credentials"
-            )
+            raise RegistryError("registry refused the credentials" if secret else "registry requires credentials")
         if status != 200:
             raise RegistryError(f"token service answered HTTP {status}")
         try:

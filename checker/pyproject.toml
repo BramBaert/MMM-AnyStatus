@@ -34,7 +34,7 @@ testpaths = ["tests"]
 addopts = "-ra"
 
 [tool.ruff]
-line-length = 110
+line-length = 150
 target-version = "py311"
 
 [tool.ruff.lint]

@@ -18,15 +18,11 @@ from anystatus.model import CheckFailure, Observation, Reading
 from anystatus.table import Table
 
 # One reply: "time=0.045 ms" (Linux), "time=12ms" / "time<1ms" (Windows), "tijd=12 ms", "Zeit<1ms", "temps=12 ms".
-_REPLY = re.compile(
-    r"\b(?:time|tijd|zeit|temps|tiempo|tempo)\s*([=<])\s*(\d+(?:[.,]\d+)?)\s*ms", re.IGNORECASE
-)
+_REPLY = re.compile(r"\b(?:time|tijd|zeit|temps|tiempo|tempo)\s*([=<])\s*(\d+(?:[.,]\d+)?)\s*ms", re.IGNORECASE)
 # "3 packets transmitted, 3 received, 0% packet loss" (iputils) / "..., 3 packets received, ..." (BusyBox)
 _STATS_UNIX = re.compile(r"(\d+)\s+packets transmitted,\s*(\d+)(?:\s+packets)?\s+received", re.IGNORECASE)
 # "Packets: Sent = 3, Received = 3, Lost = 0 (0% loss)" and its translations: three numbers, then "(N%"
-_STATS_WINDOWS = re.compile(
-    r"^[^\d\n=]+=\s*(\d+),[^\d\n=]+=\s*(\d+),[^\d\n=]+=\s*(\d+)\s*\(\d+\s*%", re.MULTILINE
-)
+_STATS_WINDOWS = re.compile(r"^[^\d\n=]+=\s*(\d+),[^\d\n=]+=\s*(\d+),[^\d\n=]+=\s*(\d+)\s*\(\d+\s*%", re.MULTILINE)
 _HOST = re.compile(r"^[A-Za-z0-9._:%-]+$")
 
 

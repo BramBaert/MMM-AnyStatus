@@ -52,9 +52,7 @@ def run(spec: Any) -> tuple[Any, Any]:
 
 def test_parse_the_captured_trivy_output() -> None:
     vulns = parse_trivy(json.dumps(fixture("trivy_alpine_3_10.json")))
-    assert [(v.id, v.package, v.severity, v.fixed) for v in vulns] == [
-        ("CVE-2021-36159", "apk-tools", "CRITICAL", "2.10.7-r0")
-    ]
+    assert [(v.id, v.package, v.severity, v.fixed) for v in vulns] == [("CVE-2021-36159", "apk-tools", "CRITICAL", "2.10.7-r0")]
 
 
 def test_only_fixable_vulnerabilities_are_parsed() -> None:
@@ -114,11 +112,7 @@ def test_high_only_is_warn(tmp_path: Path, docker: FakeDocker) -> None:
     containers(docker, "nginx:1.27")
     command = write_fake_trivy(
         tmp_path,
-        {
-            "nginx:1.27": trivy_json(
-                [("CVE-2024-4444", "HIGH", "1.27.4"), ("CVE-2024-4445", "HIGH", "1.27.5")]
-            )
-        },
+        {"nginx:1.27": trivy_json([("CVE-2024-4444", "HIGH", "1.27.4"), ("CVE-2024-4445", "HIGH", "1.27.5")])},
     )
     _, core = run(build(tmp_path, docker, command))
     assert (core.level, core.value, core.summary) == ("warn", 2, "nginx: 2 high")  # two fixes: none is named
@@ -128,11 +122,7 @@ def test_severities_change_what_counts(tmp_path: Path, docker: FakeDocker) -> No
     containers(docker, "nginx:1.27")
     command = write_fake_trivy(
         tmp_path,
-        {
-            "nginx:1.27": trivy_json(
-                [("CVE-2024-1", "CRITICAL", "2"), ("CVE-2024-2", "HIGH", "3"), ("CVE-2024-3", "MEDIUM", "4")]
-            )
-        },
+        {"nginx:1.27": trivy_json([("CVE-2024-1", "CRITICAL", "2"), ("CVE-2024-2", "HIGH", "3"), ("CVE-2024-3", "MEDIUM", "4")])},
     )
     _, core = run(build(tmp_path, docker, command, 'severities = ["critical"]'))
     assert (core.level, core.value, core.summary) == ("crit", 1, "nginx: 1 critical, fixed in 2")
@@ -171,9 +161,7 @@ def test_cache_dir_is_passed(tmp_path: Path, docker: FakeDocker) -> None:
     assert call[call.index("--cache-dir") + 1] == "/var/cache/trivy"
 
 
-def test_trivy_gets_only_the_listed_environment(
-    tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_trivy_gets_only_the_listed_environment(tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch) -> None:
     containers(docker, "a:1")
     monkeypatch.setenv("SOME_SECRET", "hunter2")
     monkeypatch.setenv("DOCKER_HOST", "tcp://proxy:2375")
@@ -237,9 +225,7 @@ def test_bad_output_is_a_failure(tmp_path: Path, docker: FakeDocker) -> None:
 
 def test_a_timeout_kills_trivy(tmp_path: Path, docker: FakeDocker) -> None:
     containers(docker, "a:1", "b:1")
-    command = write_fake_trivy(
-        tmp_path, {"a:1": trivy_json([("CVE-2024-1", "CRITICAL", "2")]), "b:1": "hang"}
-    )
+    command = write_fake_trivy(tmp_path, {"a:1": trivy_json([("CVE-2024-1", "CRITICAL", "2")]), "b:1": "hang"})
     spec = build(tmp_path, docker, command)
     started = time.monotonic()
     outcome = execute(parse_with_timeout(spec, 1.5))

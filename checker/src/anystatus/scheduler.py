@@ -93,9 +93,7 @@ class ThreadHandle:
     def _main(self) -> None:
         try:
             outcome = execute(self._spec)
-        except (
-            BaseException
-        ) as exc:  # execute handles Exception; this is for the rest, so the handle always ends
+        except BaseException as exc:  # execute handles Exception; this is for the rest, so the handle always ends
             outcome = Failure(describe_exception(exc))
         self.outcome = outcome
         self.finished_at = self._clock.now()
@@ -152,9 +150,7 @@ class Slot:
     # The results of a check that serves several (or someone else's) results as they are (Passthrough). They carry
     # their own ts, so keeping them after a failure is honest: they age out by themselves.
     passthrough: list[dict[str, Any]] | None = None
-    passthrough_prefixed: bool = (
-        False  # a document's results (own ids) rather than one result under the check's id
-    )
+    passthrough_prefixed: bool = False  # a document's results (own ids) rather than one result under the check's id
     passthrough_failures: int = 0  # failures in a row since the last good read
 
 
@@ -199,9 +195,7 @@ class Scheduler:
                 else:
                     # Down longer than the ttl: nobody knows what happened in between. The old result is still
                     # served (honest: its ts is old); since and the debounce streak start fresh with the next run.
-                    log.info(
-                        "%s: stored result is older than its ttl, starting without since and streak", spec.id
-                    )
+                    log.info("%s: stored result is older than its ttl, starting without since and streak", spec.id)
             self.slots.append(slot)
             self._start_check(spec, extras.get(spec.id), wall)
         self._publish()
@@ -223,9 +217,7 @@ class Scheduler:
             handle = slot.handle
             if handle is not None:
                 if handle.done():
-                    self._finish(
-                        slot, handle.outcome or Failure("no outcome"), handle.finished_at or self.clock.now()
-                    )
+                    self._finish(slot, handle.outcome or Failure("no outcome"), handle.finished_at or self.clock.now())
                     slot.handle = None
                     changed = True
                 elif mono - slot.started >= slot.spec.timeout + HUNG_GRACE:
@@ -271,9 +263,7 @@ class Scheduler:
 
     # internals
 
-    def _start_check(
-        self, spec: CheckSpec, stored: tuple[dict[str, Any], datetime] | None, wall: datetime
-    ) -> None:
+    def _start_check(self, spec: CheckSpec, stored: tuple[dict[str, Any], datetime] | None, wall: datetime) -> None:
         data = None
         if stored is not None and (wall - stored[1]).total_seconds() <= spec.ttl:  # the continuity rule
             data = stored[0]

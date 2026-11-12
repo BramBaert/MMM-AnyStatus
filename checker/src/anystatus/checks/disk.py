@@ -47,6 +47,4 @@ class Disk(Check):
         if self.measure == "free":
             return Reading(value=free_gb, unit="GB", text=f"{free_gb:g} GB free", fields=fields)
         percent = round(usage.used / usable * 100, 1)
-        return Reading(
-            value=percent, unit="%", text=f"{percent:g} % used, {free_gb:g} GB free", fields=fields
-        )
+        return Reading(value=percent, unit="%", text=f"{percent:g} % used, {free_gb:g} GB free", fields=fields)

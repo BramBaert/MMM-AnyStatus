@@ -71,9 +71,7 @@ def test_confirm_one_reports_at_once(one_check: Callable[..., World]) -> None:
 def test_failures_are_confirmed_like_any_level(one_check: Callable[..., World]) -> None:
     w = one_check("confirm = 2")
     w.run(ok())
-    assert (
-        w.run(Failure("connection refused"))["level"] == "ok"
-    )  # one dropped check does not turn the card grey
+    assert w.run(Failure("connection refused"))["level"] == "ok"  # one dropped check does not turn the card grey
     r = w.run(Failure("connection refused"))
     assert (r["level"], r["summary"]) == ("unknown", "connection refused")
 

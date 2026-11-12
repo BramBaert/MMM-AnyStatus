@@ -28,12 +28,8 @@ log = logging.getLogger("anystatus")
 MAX_OUTPUT = 64 * 1024  # bytes read from each of stdout and stderr; the rest is read and thrown away
 _LEVELS = {0: "ok", 1: "warn", 2: "crit", 3: "unknown"}
 # label=value[UOM];...  The label is bare or 'quoted'; the value is a number or U (unknown); the UOM is optional.
-_PERFDATA = re.compile(
-    r"\s*(?:'(?:[^']|'')*'|[^=\s']+)=([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|U)([^\d;\s'][^;\s]*)?"
-)
-_DRAIN_GRACE = (
-    2.0  # seconds to wait for the output after the process has ended (a child may keep the pipe open)
-)
+_PERFDATA = re.compile(r"\s*(?:'(?:[^']|'')*'|[^=\s']+)=([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?|U)([^\d;\s'][^;\s]*)?")
+_DRAIN_GRACE = 2.0  # seconds to wait for the output after the process has ended (a child may keep the pipe open)
 
 
 def parse_plugin_output(text: str) -> tuple[str, float | None, str | None]:
@@ -98,12 +94,12 @@ class ProcessResult:
     truncated: bool  # the process wrote more to stdout than `limit` bytes
 
 
-def run_process(
-    command: Sequence[str], env: dict[str, str], timeout: float, limit: int, secrets: Sequence[str] = ()
-) -> ProcessResult:
+def run_process(command: Sequence[str], env: dict[str, str], timeout: float, limit: int, secrets: Sequence[str] = ()) -> ProcessResult:
     """Run a command without a shell and wait for it. A timeout kills it (and what it started) and raises
     CheckFailure; so does a command that can't be started. `limit` bytes of each output stream are kept."""
-    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    flags = 0
+    if sys.platform == "win32":  # an if statement, not a conditional expression: mypy only narrows on this form
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP
     try:
         proc = subprocess.Popen(  # no shell: the command is a list
             list(command),
@@ -154,8 +150,7 @@ class Exec(Check):
             given = table.raw("command")
             if isinstance(given, str):
                 table.error(
-                    '\'command\' must be a list such as ["/usr/lib/nagios/plugins/check_x", "-w", "5"], not a '
-                    "string: it is run without a shell"
+                    '\'command\' must be a list such as ["/usr/lib/nagios/plugins/check_x", "-w", "5"], not a string: it is run without a shell'
                 )
             elif not isinstance(given, list) or not given or not all(isinstance(a, str) for a in given):
                 table.error("'command' must be a non-empty list of text values")

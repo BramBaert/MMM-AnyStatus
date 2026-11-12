@@ -84,10 +84,7 @@ class DockerStatus(Check):
     def from_config(cls, table: Table) -> DockerStatus:
         for key in ("warn", "crit", "worse"):
             if table.has(key):
-                table.error(
-                    f"docker_status decides its own level (crit: missing, not running or unhealthy; warn: "
-                    f"restarting): '{key}' is not used"
-                )
+                table.error(f"docker_status decides its own level (crit: missing, not running or unhealthy; warn: restarting): '{key}' is not used")
         endpoint = docker_endpoint(table)
         names = table.str_list("containers")
         labels = table.str_list("labels")
@@ -122,10 +119,7 @@ class DockerStatus(Check):
     def _save(self) -> None:
         if self._memory is not None:
             data: dict[str, Any] = {
-                "restarts": {
-                    name: {"id": h.container_id, "samples": [[t, c] for t, c in h.samples]}
-                    for name, h in self._history.items()
-                }
+                "restarts": {name: {"id": h.container_id, "samples": [[t, c] for t, c in h.samples]} for name, h in self._history.items()}
             }
             self._memory.save(data)
 
@@ -141,9 +135,7 @@ class DockerStatus(Check):
             return self.client.get_json(path, query, timeout=remaining)
 
         now = self._now()
-        problems: dict[
-            str, tuple[int, list[str]]
-        ] = {}  # name -> (0 crit / 1 warn, what is wrong), in order found
+        problems: dict[str, tuple[int, list[str]]] = {}  # name -> (0 crit / 1 warn, what is wrong), in order found
         targets: list[tuple[str, str]] = []  # (name, id) of the containers to look at
 
         if self.containers is not None:
@@ -179,9 +171,7 @@ class DockerStatus(Check):
             wrong: list[str] = []
             level = 1
             if status != "running":
-                wrong.append(
-                    f"not running ({status})" if isinstance(status, str) and status else "not running"
-                )
+                wrong.append(f"not running ({status})" if isinstance(status, str) and status else "not running")
                 level = 0
             if health_status == "unhealthy":
                 wrong.append("unhealthy")
@@ -202,9 +192,7 @@ class DockerStatus(Check):
 
         if not problems:
             noun = "container" if len(targets) == 1 else "containers"
-            return Observation(
-                level="ok", summary=f"{len(targets)} {noun} fine" if targets else "no containers", value=0
-            )
+            return Observation(level="ok", summary=f"{len(targets)} {noun} fine" if targets else "no containers", value=0)
         listed = {name: i for i, name in enumerate(self.containers or [])}
         # crit first; then in the order of the config (or, without a list, as the API listed them)
         ordered = sorted(problems.items(), key=lambda item: (item[1][0], listed.get(item[0], 0)))

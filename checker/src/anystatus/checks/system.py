@@ -44,9 +44,7 @@ class System(Check):
         measure = table.choice("measure", MEASURES, "temperature")
         zone = table.opt_str("zone")
         if zone is not None and (measure != "temperature" or not _ZONE.match(zone)):
-            table.error(
-                '\'zone\' is only for measure = "temperature" and names a thermal zone such as "thermal_zone0"'
-            )
+            table.error('\'zone\' is only for measure = "temperature" and names a thermal zone such as "thermal_zone0"')
             zone = None
         return cls(measure, zone)
 

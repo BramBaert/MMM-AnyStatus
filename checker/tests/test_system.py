@@ -11,9 +11,7 @@ from anystatus.model import Failure, Reading
 from anystatus.scheduler import execute
 from anystatus.table import ConfigError
 
-MEMINFO = (
-    "MemTotal:        8000000 kB\nMemFree:          100000 kB\nMemAvailable:    2000000 kB\nBuffers: 5 kB\n"
-)
+MEMINFO = "MemTotal:        8000000 kB\nMemFree:          100000 kB\nMemAvailable:    2000000 kB\nBuffers: 5 kB\n"
 
 
 @pytest.fixture(autouse=True)
@@ -41,9 +39,7 @@ def test_temperature_is_the_highest_zone(tmp_path: Path) -> None:
     put(root, "sys/class/thermal/cooling_device0/temp", "99000\n")  # not a thermal zone
     spec = spec_for(tmp_path, "temperature", "warn = 60\ncrit = 80")
     outcome = execute(spec)
-    assert outcome == Reading(
-        value=61.5, unit="°C", text="61.5 °C (thermal_zone1)", fields={"zone": "thermal_zone1"}
-    )
+    assert outcome == Reading(value=61.5, unit="°C", text="61.5 °C (thermal_zone1)", fields={"zone": "thermal_zone1"})
     core = judge(spec, outcome)
     assert (core.level, core.summary, core.unit) == ("warn", "61.5 °C (thermal_zone1)", "°C")
 

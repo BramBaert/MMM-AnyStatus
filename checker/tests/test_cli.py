@@ -8,9 +8,7 @@ import pytest
 
 from anystatus.cli import main
 
-SCHEMA = json.loads(
-    (Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8")
-)
+SCHEMA = json.loads((Path(__file__).parents[2] / "schema" / "results-1.schema.json").read_text(encoding="utf-8"))
 
 GOOD = """
 [checker]
@@ -37,9 +35,7 @@ def test_validate_ok(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None
 def test_validate_lists_every_problem(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "c.toml"
     path.write_text(
-        GOOD.replace('name = "cli-test"', 'colour = "red"').replace(
-            'type = "python"\nfunction = "support_checks:decide"', 'type = "nope"'
-        ),
+        GOOD.replace('name = "cli-test"', 'colour = "red"').replace('type = "python"\nfunction = "support_checks:decide"', 'type = "nope"'),
         encoding="utf-8",
     )
     assert main(["validate", str(path)]) == 2
