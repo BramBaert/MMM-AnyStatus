@@ -109,7 +109,7 @@ interval = "10s"
 warn = "20s"
 crit = "40s"
 
-# docker_status, docker_updates and image_vulns through the compose `docker-socket-proxy` (GET on /containers and /images only).
+# docker_status, docker_updates and image_vulns through the compose `docker-socket-proxy` (only the GET paths they use).
 # docker_updates asks Docker Hub / ghcr.io about the dev stack's own public images, once a day.
 [[check]]
 id = "docker.containers"

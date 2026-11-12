@@ -1,6 +1,6 @@
 # MMM-AnyStatus
 
-A calm status display for [MagicMirrorÂ²](https://magicmirror.builders/): a big **All OK** when everything is fine,
+A calm status display for [MagicMirror²](https://magicmirror.builders/): a big **All OK** when everything is fine,
 otherwise only what needs attention, with the reason and how long it has been like that.
 
 - **Red** (`crit`): broken now. **Amber** (`warn`): can wait until the weekend. **Grey** (`unknown`): no recent

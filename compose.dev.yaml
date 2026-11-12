@@ -38,16 +38,21 @@ services:
         mosquitto_pub -h mosquitto -t demo/plug/LWT -r -m Online
         while true; do mosquitto_pub -h mosquitto -t demo/heartbeat -m tick; sleep 10; done
 
-  # Read-only access to the Docker API for the docker_status, docker_updates and image_vulns checks (and Trivy reading
-  # local images): only GET on /containers and /images, everything else (and every POST) is refused. The checker
-  # reaches it at tcp://docker-socket-proxy:2375. Mounting the socket :ro here does not make the API read-only; the
-  # proxy does.
+  # The checker's only way to Docker (docker_status, docker_updates, image_vulns, and Trivy reading local images):
+  # exactly the GET paths they use, and HEAD /_ping for Trivy; every other path, method and client is refused. Not a
+  # container's details (/containers/{id}/json): they hold its whole environment, so usually its passwords. Mounting
+  # the socket :ro does not make the API read-only; the proxy does. docs/checker.md, "Docker access".
+  # The checker reaches it at tcp://docker-socket-proxy:2375.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0
-    environment:
-      CONTAINERS: 1
-      IMAGES: 1
-      POST: 0 # the default, spelled out
+    image: wollomatic/socket-proxy:1.13.2
+    # Its own user, with the socket's group to open it: 0 on Docker Desktop. On Linux the socket's group is `docker`,
+    # whose number differs per machine: DOCKER_SOCKET_GID=$(stat -c %g /var/run/docker.sock)
+    user: "65534:${DOCKER_SOCKET_GID:-0}"
+    command:
+      - "-listenip=0.0.0.0"
+      - "-allowfrom=checker"
+      - "-allowGET=(/v1\\.[0-9]+)?/(containers/json|events|images/json|images/.+/json|images/.+/history|images/get)"
+      - "-allowHEAD=(/v1\\.[0-9]+)?/_ping"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 

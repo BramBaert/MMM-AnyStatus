@@ -73,18 +73,31 @@ class _DockerHandler(BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         query = parse_qs(parts.query)
         segments = parts.path.strip("/").split("/")
-        if parts.path == "/images/json":
+        if parts.path in o.refuse_paths:
+            _send(self, o.refuse_paths[parts.path], b'{"message":"refused"}')
+        elif parts.path == "/images/json":
             listing = [{"Id": i["Id"], "RepoTags": i.get("RepoTags") or [], "RepoDigests": i.get("RepoDigests") or []} for i in o.images.values()]
             _send(self, 200, json.dumps(listing).encode(), {"Content-Type": "application/json"})
         elif parts.path == "/containers/json":
             listing = o.list_containers(all_=query.get("all") == ["true"], filters=json.loads(query.get("filters", ["{}"])[0]))
             _send(self, 200, json.dumps(listing).encode(), {"Content-Type": "application/json"})
+        elif parts.path == "/events":
+            since, until = int(query["since"][0]), int(query["until"][0])
+            filters = json.loads(query.get("filters", ["{}"])[0])
+            found = [
+                e
+                for e in o.events
+                if since <= e["time"] <= until
+                and e["Type"] in filters.get("type", [e["Type"]])
+                and e["Action"] in filters.get("event", [e["Action"]])
+            ]
+            # One JSON value after the other, as Docker streams them
+            body = o.events_body if o.events_body is not None else "".join(json.dumps(e) + "\n" for e in found)
+            _send(self, 200, body.encode(), {"Content-Type": "application/json"})
         elif len(segments) == 3 and segments[0] == "containers" and segments[2] == "json":
-            info = o.inspect.get(segments[1])
-            if info is None:
-                _send(self, 404, b'{"message":"no such container"}')
-            else:
-                _send(self, 200, json.dumps(info).encode(), {"Content-Type": "application/json"})
+            # A container's details hold its whole environment (passwords): the checker must never ask for them, so
+            # this fake refuses them, as a socket proxy that allows paths does
+            _send(self, 403, b'{"message":"container details are not allowed"}')
         elif len(segments) == 3 and segments[0] == "images" and segments[2] == "json":
             image = o.images.get(segments[1])
             if image is None:
@@ -98,7 +111,8 @@ class _DockerHandler(BaseHTTPRequestHandler):
 
 
 class FakeDocker(_Server):
-    """Serves /containers/json, /containers/{id}/json and /images/{id}/json from state the test can change.
+    """Serves /containers/json, /events, /images/json and /images/{id}/json from state the test can change, and refuses
+    a container's details (/containers/{id}/json) as a socket proxy that allows paths does.
 
     Starts from the captured fixture (a Docker Desktop's answers, trimmed and anonymised) unless `empty`."""
 
@@ -106,12 +120,14 @@ class FakeDocker(_Server):
 
     def __init__(self, empty: bool = False) -> None:
         self.list: list[dict[str, Any]] = []
-        self.inspect: dict[str, dict[str, Any]] = {}
         self.images: dict[str, dict[str, Any]] = {}
+        self.events: list[dict[str, Any]] = []
+        self.events_body: str | None = None  # send this as /events' answer instead (a broken stream)
         self.refuse: int | None = None  # answer every request with this status (a socket proxy that says no)
+        self.refuse_paths: dict[str, int] = {}  # answer these paths with this status
         if not empty:
             data = json.loads((FIXTURES / "docker_dev_stack.json").read_text(encoding="utf-8"))
-            self.list, self.inspect, self.images = data["list"], data["inspect"], data["images"]
+            self.list, self.images = data["list"], data["images"]
         super().__init__()
 
     @property
@@ -132,10 +148,10 @@ class FakeDocker(_Server):
             out.append(item)
         return out
 
-    def by_name(self, name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def by_name(self, name: str) -> dict[str, Any]:
         for item in self.list:
             if item["Names"][0] == "/" + name:
-                return item, self.inspect[item["Id"]]
+                return item
         raise KeyError(name)
 
     def set_state(
@@ -143,27 +159,38 @@ class FakeDocker(_Server):
         name: str,
         status: str | None = None,
         health: str | None = None,
-        restarts: int | None = None,
         labels: dict[str, str] | None = None,
     ) -> None:
-        item, info = self.by_name(name)
+        """`health` as Docker 29 lists it (a `Health` object); older engines only say it in `Status`, see set_status."""
+        item = self.by_name(name)
         if status is not None:
-            item["State"], info["State"]["Status"] = status, status
-            info["State"]["Running"] = status == "running"
+            item["State"] = status
         if health is not None:
-            info["State"]["Health"] = {"Status": health}
-        if restarts is not None:
-            info["RestartCount"] = restarts
+            item["Health"] = {"Status": health, "FailingStreak": 0}
         if labels is not None:
             item["Labels"] = labels
 
-    def recreate(self, name: str, new_id: str) -> None:
-        """The container is replaced by a new one with the same name (its RestartCount starts again)."""
-        item, info = self.by_name(name)
-        del self.inspect[item["Id"]]
-        item["Id"] = info["Id"] = new_id
-        info["RestartCount"] = 0
-        self.inspect[new_id] = info
+    def set_status(self, name: str, text: str) -> None:
+        """The list's status text, without a `Health` object (an engine older than Docker 29)."""
+        item = self.by_name(name)
+        item.pop("Health", None)
+        item["Status"] = text
+
+    def die(self, name: str, at: float, exit_code: int = 1) -> None:
+        """A `die` event of the container (it stopped; with a restart policy, Docker starts it again)."""
+        item = self.by_name(name)
+        self.events.append(
+            {
+                "Type": "container",
+                "Action": "die",
+                "status": "die",
+                "id": item["Id"],
+                "Actor": {"ID": item["Id"], "Attributes": {"name": name, "exitCode": str(exit_code), "image": item["Image"]}},
+                "scope": "local",
+                "time": int(at),
+                "timeNano": int(at * 1e9),
+            }
+        )
 
     def add_container(
         self,
@@ -185,14 +212,6 @@ class FakeDocker(_Server):
                 "Labels": {},
             }
         )
-        self.inspect[container_id] = {
-            "Id": container_id,
-            "Name": "/" + name,
-            "Image": image_id,
-            "RestartCount": 0,
-            "State": {"Status": "running", "Running": True},
-            "Config": {"Image": image},
-        }
         if image_id not in self.images:
             self.add_image(image_id, repo_tags if repo_tags is not None else [image], repo_digests or [])
 
@@ -218,8 +237,6 @@ class FakeDocker(_Server):
         """Keep only these containers (and their images)."""
         keep = {"/" + n for n in names}
         self.list = [i for i in self.list if i["Names"][0] in keep]
-        ids = {i["Id"] for i in self.list}
-        self.inspect = {k: v for k, v in self.inspect.items() if k in ids}
         images = {i["ImageID"] for i in self.list}
         self.images = {k: v for k, v in self.images.items() if k in images}
 

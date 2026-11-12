@@ -95,9 +95,10 @@ stuck check can never hide behind a last "OK".
   container: a volume, so it survives restarts and new versions. Losing it only resets those.
 - **It serves its current results over HTTP**, on a port from its config. Each result again every round (a
   heartbeat), so the module's age rule works.
-- **Docker access:** the Docker socket is root on its host. The checker should need **read-only** access only.
-  How: **decided: docker-socket-proxy, see [checker.md](checker.md)** (`CONTAINERS=1`, `IMAGES=1`; mounting the socket
-  `:ro` is not read-only).
+- **Docker access:** the Docker socket is root on its host, and reading a container's details shows its passwords.
+  **Decided: the checks use only the paths they need, never a container's details, behind
+  `wollomatic/socket-proxy` allowing exactly those paths**; see [checker.md, "Docker access"](checker.md#docker-access-and-what-it-can-read)
+  (mounting the socket `:ro` is not read-only).
 - **Python 3.11 or newer** (decided 2026-11-11): 3.11 brings `tomllib` and is what Debian 12 / Raspberry Pi OS
   ship. Developed on 3.14; CI tests both ends.
 - **Installable with uv or pip**; PyPI later. A container image for those who run everything in Docker.
@@ -183,6 +184,18 @@ How each works in detail: [checker.md](checker.md).
     (Bram: for those in the know it says much more than "waiting for fix"), "mariadb: 1 critical, no fix exists".
     The full list (CVE, package, installed and fixed version, class, first found) is on a page of the checker's own,
     `/vulns` next to `/results`, since a display can't be clicked.
+- **Docker read access showed every container's passwords: said, and designed out** (Bram, 2026-11-12). A
+  container's details (`GET /containers/{id}/json`) hold its whole environment; a proxy that only refuses changes
+  hands them to anyone who reaches it, the checker's code and Trivy included. Now `docker_status` takes state and
+  health from the container list and restarts from Docker's `die` events, so no check reads the details, and the
+  recommended proxy is `wollomatic/socket-proxy` with an allowlist of exactly the paths used, which refuses them.
+  Tecnativa's `docker-socket-proxy`, recommended before, can't tell the list from the details, and its images
+  hadn't been rebuilt in a long time (9 HIGH/CRITICAL findings fixed in Alpine, 2026-11-12; Bram: "damning" for a
+  proxy this project introduces). The warning stays in the technical docs as well
+  ([checker.md, "Docker access"](checker.md#docker-access-and-what-it-can-read)): what read access shows, no
+  `ports:` on the proxy, pin the checker and Trivy, passwords in files rather than the environment. Tested against
+  a throwaway container with a fake secret; the tests' fake Docker refuses container details, so a check that starts
+  asking for them fails.
 
 ## The module
 
@@ -246,14 +259,6 @@ What was decided then is built and described above ("From the first real deploym
 
 - **Escalation by age:** "amber for longer than 60 days becomes red" (pending updates are never more than amber).
   `show_after` doesn't do that; it would be one more entry, e.g. `escalate = { crit = "60d" }`.
-- **The recommended Docker socket proxy is unmaintained.** `tecnativa/docker-socket-proxy:v0.5.0` (named in the
-  README, `checker.md` and `compose.dev.yaml`) and its `latest` were one old build with 9 HIGH/CRITICAL findings,
-  all fixed in Alpine but never rebuilt (Trivy 0.76.1, 2026-11-12); Bram: "damning" for a proxy this project
-  introduces. `linuxserver/socket-proxy` is a fork with the same settings (`CONTAINERS`, `IMAGES`, `POST`), rebuilt
-  about weekly, with none (tested 2026-11-12 with the same settings: `POST` and a section that isn't on answer `403`,
-  `GET /containers/json` `200`). Only exact tags (the HAProxy version, e.g. `3.4.7`), which linuxserver rebuilds
-  while current. `wollomatic/socket-proxy` (Go, signed images, a different config) had none either. To change: the
-  three places above.
 - **`docker_updates`: `versions = "patch"`.** A newer tag with the same major.minor (`3.4.7` → `3.4.8`,
   `1.37.4` → `1.37.5`), not `11.4` → `11.8`. For setups that fix major.minor on purpose but have images that only
   publish exact tags: `versions = "none"` misses those patches, `"minor"` flags every minor release.
@@ -261,6 +266,14 @@ What was decided then is built and described above ("From the first real deploym
 ## Future work
 
 Not planned yet; how they play out in practice decides their priority.
+
+- **Docker on more than one machine** (Bram, 2026-11-12). `docker_status` and `docker_updates` already take a Docker
+  address per check, so one checker can watch several hosts. `image_vulns` can't yet: Trivy gets `DOCKER_HOST`
+  from the checker's own environment (the `env` list), one value for every check, so a second `image_vulns` check
+  pointing at another host would make Trivy look for that host's images on the first one. Fix: give Trivy the
+  check's own `docker` address as `DOCKER_HOST`. The README should then say how to reach a remote host safely: a
+  socket proxy there, reachable only from the checker's machine (a firewall rule, or a VPN such as Tailscale with
+  an access rule), because reading through it shows every container's environment, passwords included.
 
 - **Seen and accepted, with an end date** (Bram, 2026-11-12): a list in the config, e.g. `accept = [{ cve = "CVE-…",
   image = "mariadb", until = "2027-01-31", why = "…" }]`. An accepted CVE doesn't count until its date, then it is

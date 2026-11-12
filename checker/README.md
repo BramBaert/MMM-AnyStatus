@@ -259,10 +259,11 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   container. Not both. A *listed* container that is missing or not running is `crit` ("backup: missing", "db: not
   running (exited)"; with `labels` or the default only running containers are looked at). `unhealthy` is `crit`,
   `starting` is fine. More than `restarts` (default 3) restarts within `restart_window` (default `"1h"`) is `warn`
-  ("web: 5 restarts in 1 h"): the growth of Docker's `RestartCount`, kept in the memory file so the window survives a
-  checker restart (within the `ttl`). The first sighting of a container never counts as growth. The value is the number of
-  containers that are not fine, the level the worst. The check decides its own level: `warn`, `crit` and `worse` are
-  a config error. Docker unreachable (or a proxy that refuses the path) is `unknown`.
+  ("web: 5 restarts in 1 h"): the container's `die` events from Docker's event log, kept in the memory file so the
+  window survives a checker restart (within the `ttl`). It reads only the container list and the events, never a
+  container's details (those hold its passwords, see below). The value is the number of containers that are not fine,
+  the level the worst. The check decides its own level: `warn`, `crit` and `worse` are a config error. Docker
+  unreachable (or a proxy that refuses the path) is `unknown`.
 
   **`docker_updates`**: does an image of a running container have an update in its registry? *Rebuilt*: the digest
   the registry gives for the tag (one `HEAD` on the manifest, which Docker Hub doesn't count as a pull) is none of
@@ -326,7 +327,8 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   time that is left of the run, and a timeout kills Trivy. An image that couldn't be scanned is counted in the
   summary ("1 not scanned"); no image scanned at all is `unknown`. As for `exec`, only the environment variables
   listed in `env` reach Trivy, `PATH` included: Trivy usually needs `env = ["HOME", "DOCKER_HOST"]` (it reads local
-  images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375` with `IMAGES=1` on the proxy), and
+  images through the Docker API, so `DOCKER_HOST=tcp://docker-socket-proxy:2375`, see below for what the proxy must
+  allow), and
   for a private registry its own `TRIVY_USERNAME`/`TRIVY_PASSWORD` to scan a newer build there. The registry lookups
   use `registry_auth_env` as `docker_updates` does. The checker image doesn't contain Trivy. `warn`, `crit` and
   `worse` are a config error; `severities` is replaced by `schedule`.
@@ -395,28 +397,41 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
 
 The Docker socket is root on its host: anything that can `POST` to it can start a privileged container. The checks
 only ever `GET`, but **mounting `/var/run/docker.sock:ro` does not make the API read-only**: `:ro` protects the
-socket *file* from being replaced, while every request through it still works. Put a
-[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in between, which refuses every `POST` and every
-section you don't switch on, and point the checks at it. The checker then needs no access to the socket at all:
+socket *file* from being replaced, while every request through it still works. And **reading isn't harmless
+either**: a container's details include its whole environment, so usually its passwords. The checks never ask for
+them, but a proxy that only refuses changes would still hand them to anyone who can reach it.
+
+So put [wollomatic/socket-proxy](https://github.com/wollomatic/socket-proxy) in between, allowing exactly the paths
+the checks and Trivy use, and point the checks at it. The checker then needs no access to the socket at all:
 
 ```yaml
 services:
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0
-    environment:
-      CONTAINERS: 1      # GET /containers/...: docker_status, docker_updates, image_vulns
-      IMAGES: 1          # GET /images/...: docker_updates (and Trivy reading local images)
-      POST: 0            # the default: no change is possible
+    image: wollomatic/socket-proxy:1.13.2
+    # its own user, with the socket's group: `stat -c %g /var/run/docker.sock` (0 on Docker Desktop)
+    user: "65534:999"
+    command:
+      - "-listenip=0.0.0.0"
+      - "-allowfrom=checker"       # the checker's service name: no other container may use it
+      - "-allowGET=(/v1\\.[0-9]+)?/(containers/json|events|images/json|images/.+/json|images/.+/history|images/get)"
+      - "-allowHEAD=(/v1\\.[0-9]+)?/_ping"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # no ports: only the checker's network can reach it
+    networks: [docker]             # no ports:, never the host's network
   checker:
     # ...
     depends_on: [docker-socket-proxy]
+    networks: [docker, default]
+
+networks:
+  docker:
+    internal: true                 # the proxy and the checker only, no way out
 ```
 
-and `docker = "tcp://docker-socket-proxy:2375"` in the checks. `compose.dev.yaml` in this repository runs exactly
-this for the dev stack; a `POST /containers/create` through it answers `403 Forbidden`.
+and `docker = "tcp://docker-socket-proxy:2375"` in the checks. A container's details, files, logs and every change
+answer `403` or `405`. What each path is for, what the rest of the setup must avoid, and how this was tested:
+[docs/checker.md, "Docker access"](../docs/checker.md#docker-access-and-what-it-can-read). `compose.dev.yaml` in this
+repository runs this proxy for the dev stack.
 
 Every check also takes `label`, `group`, `interval`, `timeout`, `ttl`, `show_after`, `warn`, `crit`, `worse` and
 `summary` (a template: `"last backup {age} ago"`), as described in docs/checker.md.

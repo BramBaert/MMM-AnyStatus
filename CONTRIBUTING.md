@@ -27,8 +27,8 @@ MagicMirror (server only, image pinned in `compose.dev.yaml`) with this folder m
 `node_helper.js` needs `docker compose -f compose.dev.yaml restart magicmirror`.
 
 The fourth instance, under the left column, shows the real checker (`checker/`, running `dev/checker.toml`: the
-example checks, three mqtt checks against the compose `mosquitto`, and three Docker checks through a read-only
-socket proxy, `image_vulns` among them, with Trivy copied in from its own image by the `trivy-bin` service). It starts
+example checks, three mqtt checks against the compose `mosquitto`, and three Docker checks through a socket proxy
+that allows only the paths they use, `image_vulns` among them, with Trivy copied in from its own image by the `trivy-bin` service). It starts
 with MagicMirror, or alone with `docker compose -f compose.dev.yaml up -d checker`. MagicMirror reaches it inside the
 compose network; its own pages are also published to this PC (127.0.0.1 only, not on the network):
 <http://localhost:8099/> (an overview), <http://localhost:8099/results> (the JSON) and

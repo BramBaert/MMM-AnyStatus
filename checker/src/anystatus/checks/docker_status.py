@@ -1,27 +1,29 @@
 """`docker_status`: are the containers that should run running, healthy and not restarting in a loop?
 
-Reads the Docker API (GET only, see docker_api). The check decides its own level (so `warn`, `crit`, `worse` are not
-accepted): crit for a listed container that is missing or not running and for an `unhealthy` one, warn for more than
-`restarts` restarts within `restart_window`. The value is the number of containers that aren't fine.
+Reads only the container list (GET /containers/json) and Docker's events (GET /events), never a container's details
+(GET /containers/{id}/json): those hold the container's whole environment, so usually its passwords, and a socket
+proxy that allows paths rather than whole sections can then refuse them (docs/checker.md, "Docker access").
 
-The restart history (a RestartCount sample whenever the count changes) is kept in the check's memory, so the window
-survives a restart of the checker within the continuity rule.
+The check decides its own level (so `warn`, `crit`, `worse` are not accepted): crit for a listed container that is
+missing or not running and for an `unhealthy` one, warn for more than `restarts` restarts within `restart_window`.
+The value is the number of containers that aren't fine.
+
+Health comes from the list's `Health` (Docker 29), or else from its status text ("Up 3 hours (unhealthy)"). Restarts
+are a container's `die` events. Each run asks for the events since the previous run, a short stretch well within the
+few hundred recent events the daemon keeps, and the times are kept in the check's memory for the window, so the
+window survives a restart of the checker within the continuity rule. Without that memory (a first start, `once`)
+the run asks for the whole window, as far back as the daemon still has events.
 """
 
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any
 
 from anystatus.checks.base import Check, CheckMemory, register
-from anystatus.checks.docker_api import (
-    DockerClient,
-    Endpoint,
-    NotFound,
-    docker_endpoint,
-)
+from anystatus.checks.docker_api import DockerClient, Endpoint, docker_endpoint
 from anystatus.model import CheckFailure, Observation
 from anystatus.table import Table
 from anystatus.timeutil import format_duration
@@ -29,34 +31,25 @@ from anystatus.timeutil import format_duration
 DEFAULT_RESTARTS = 3
 DEFAULT_WINDOW = 3600.0
 MAX_NAMES = 6  # containers named in a summary; the rest is counted
-
-
-@dataclass
-class _History:
-    """RestartCount samples of one container: (time, count) at the first sighting and whenever the count changed."""
-
-    container_id: str
-    samples: list[tuple[float, int]] = field(default_factory=list)
-
-    def growth(self, count: int, now: float, window: float) -> int:
-        """Restarts within the window, and record this sighting."""
-        if self.samples and count < self.samples[-1][1]:
-            self.samples = []  # the counter was reset (the container was recreated)
-        if not self.samples or count != self.samples[-1][1]:
-            self.samples.append((now, count))
-        start = now - window
-        baseline = self.samples[0][1]
-        keep = 0
-        for index, (moment, sampled) in enumerate(self.samples):
-            if moment <= start:
-                baseline, keep = sampled, index  # the latest sample at or before the window's start
-        self.samples = self.samples[keep:]
-        return count - baseline
+DIE_EVENTS = json.dumps({"type": ["container"], "event": ["die"]})
 
 
 def window_text(seconds: float) -> str:
     value, unit = format_duration(seconds)
     return f"{value:g} {unit}"
+
+
+def health_of(item: dict[str, Any]) -> str | None:
+    """`healthy`, `unhealthy`, `starting`, `none` or None, from a list entry."""
+    health = item.get("Health")
+    if isinstance(health, dict) and isinstance(health.get("Status"), str):
+        return str(health["Status"])
+    status = item.get("Status")
+    if isinstance(status, str):
+        for text, value in (("(unhealthy)", "unhealthy"), ("(health: starting)", "starting"), ("(healthy)", "healthy")):
+            if text in status:
+                return value
+    return None
 
 
 @register
@@ -77,7 +70,9 @@ class DockerStatus(Check):
         self.restarts = restarts
         self.window = window
         self._now = time.time  # tests replace it
-        self._history: dict[str, _History] = {}
+        self._dies: dict[str, list[float]] = {}  # container name -> times of its `die` events within the window
+        self._until: int | None = None  # where the last run's question about events ended (whole seconds)
+        self._newest: int = 0  # timeNano of the newest event recorded, so a boundary second isn't counted twice
         self._memory: CheckMemory | None = None
 
     @classmethod
@@ -103,92 +98,66 @@ class DockerStatus(Check):
     def start(self, memory: CheckMemory) -> None:
         self._memory = memory
         data = memory.data
-        saved = data.get("restarts") if isinstance(data, dict) else None
-        if not isinstance(saved, dict):
+        if not isinstance(data, dict):
             return
-        for name, entry in saved.items():
-            try:
-                history = _History(
-                    str(entry["id"]),
-                    [(float(t), int(c)) for t, c in entry["samples"]],  # [[time, count], ...]
-                )
-            except (KeyError, TypeError, ValueError):
-                continue
-            self._history[str(name)] = history
+        try:
+            dies = {str(name): [float(t) for t in times] for name, times in data["dies"].items()}
+            until, newest = int(data["until"]), int(data["newest"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return  # an old or damaged memory: start as without one
+        self._dies, self._until, self._newest = dies, until, newest
 
     def _save(self) -> None:
-        if self._memory is not None:
-            data: dict[str, Any] = {
-                "restarts": {name: {"id": h.container_id, "samples": [[t, c] for t, c in h.samples]} for name, h in self._history.items()}
-            }
-            self._memory.save(data)
+        if self._memory is not None and self._until is not None:
+            self._memory.save({"dies": self._dies, "until": self._until, "newest": self._newest})
 
     # run
 
     def run(self, timeout: float) -> Observation:
         deadline = time.monotonic() + timeout
 
-        def get(path: str, query: dict[str, str] | None = None) -> Any:
+        def left() -> float:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise CheckFailure(f"timed out after {timeout:g} s")
-            return self.client.get_json(path, query, timeout=remaining)
+            return remaining
 
         now = self._now()
         problems: dict[str, tuple[int, list[str]]] = {}  # name -> (0 crit / 1 warn, what is wrong), in order found
-        targets: list[tuple[str, str]] = []  # (name, id) of the containers to look at
+        targets: list[tuple[str, dict[str, Any]]] = []  # (name, list entry) of the containers to look at
 
         if self.containers is not None:
-            listing = _listing(get("/containers/json", {"all": "true"}))
+            listing = _listing(self.client.get_json("/containers/json", {"all": "true"}, timeout=left()))
             by_name = {n: item for item in listing for n in _names(item)}
             for name in self.containers:
                 item = by_name.get(name)
                 if item is None:
                     problems[name] = (0, ["missing"])
                 else:
-                    targets.append((name, str(item.get("Id", ""))))
+                    targets.append((name, item))
         else:
             query = {"filters": json.dumps({"label": self.labels})} if self.labels else None
-            for item in _listing(get("/containers/json", query)):
+            for item in _listing(self.client.get_json("/containers/json", query, timeout=left())):
                 names = _names(item)
-                targets.append((names[0] if names else str(item.get("Id", ""))[:12], str(item.get("Id", ""))))
+                targets.append((names[0] if names else str(item.get("Id", ""))[:12], item))
 
-        histories: dict[str, _History] = {}
-        for name, container_id in targets:
-            try:
-                info = get(f"/containers/{container_id}/json")
-            except NotFound:
-                if self.containers is not None:
-                    problems[name] = (0, ["missing"])
-                continue  # a container that went away between the two calls
-            if not isinstance(info, dict):
-                raise CheckFailure("unexpected answer from the Docker API")
-            state = info.get("State")
-            state = state if isinstance(state, dict) else {}
-            status = state.get("Status")
-            health = state.get("Health")
-            health_status = health.get("Status") if isinstance(health, dict) else None
+        self._record_dies(now, left)
+
+        for name, item in targets:
+            state = item.get("State")
             wrong: list[str] = []
             level = 1
-            if status != "running":
-                wrong.append(f"not running ({status})" if isinstance(status, str) and status else "not running")
+            if state != "running":
+                wrong.append(f"not running ({state})" if isinstance(state, str) and state else "not running")
                 level = 0
-            if health_status == "unhealthy":
+            if health_of(item) == "unhealthy":
                 wrong.append("unhealthy")
                 level = 0
-            count = info.get("RestartCount")
-            if isinstance(count, int) and not isinstance(count, bool):
-                history = self._history.get(name)
-                if history is None or history.container_id != container_id:
-                    history = _History(container_id)
-                histories[name] = history
-                grown = history.growth(count, now, self.window)
-                if grown > self.restarts:
-                    wrong.append(f"{grown} restarts in {window_text(self.window)}")
+            restarts = len(self._dies.get(name, []))
+            if restarts > self.restarts:
+                wrong.append(f"{restarts} restarts in {window_text(self.window)}")
             if wrong:
                 problems[name] = (level, wrong)
-        self._history = histories
-        self._save()
 
         if not problems:
             noun = "container" if len(targets) == 1 else "containers"
@@ -201,6 +170,30 @@ class DockerStatus(Check):
             shown.append(f"+{len(ordered) - MAX_NAMES} more")
         level_name = "crit" if ordered[0][1][0] == 0 else "warn"
         return Observation(level=level_name, summary="; ".join(shown), value=len(problems))
+
+    def _record_dies(self, now: float, left: Callable[[], float]) -> None:
+        """Add the `die` events since the last run (or of the whole window) and forget those older than the window."""
+        start = now - self.window
+        since = self._until if self._until is not None and self._until > start else int(start)
+        until = int(now)
+        events = self.client.get_json_stream("/events", {"since": str(since), "until": str(until), "filters": DIE_EVENTS}, timeout=left())
+        newest = self._newest
+        for event in events:
+            if not isinstance(event, dict) or event.get("Action", event.get("status")) != "die":
+                continue
+            actor = event.get("Actor")
+            attributes = actor.get("Attributes") if isinstance(actor, dict) else None
+            name = attributes.get("name") if isinstance(attributes, dict) else None
+            nano = event.get("timeNano")
+            if not isinstance(name, str) or not isinstance(nano, int) or isinstance(nano, bool):
+                continue
+            if nano <= self._newest:
+                continue  # already counted: the previous question ended in the same second
+            self._dies.setdefault(name, []).append(nano / 1e9)
+            newest = max(newest, nano)
+        self._dies = {name: kept for name, times in self._dies.items() if (kept := [t for t in times if t > start])}
+        self._until, self._newest = until, newest
+        self._save()
 
 
 def _listing(data: Any) -> list[dict[str, Any]]:

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import http.client
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fakes import FakeDocker
 from helpers import parse
 
 from anystatus.checks.docker_api import DockerClient, is_windows, parse_endpoint, running_images
-from anystatus.checks.docker_status import DockerStatus
+from anystatus.checks.docker_status import DockerStatus, health_of
 from anystatus.judge import judge
 from anystatus.model import Failure, Observation
 from anystatus.scheduler import execute
@@ -76,6 +78,29 @@ def test_unhealthy_is_crit_and_starting_is_fine(tmp_path: Path, docker: FakeDock
     assert (core.level, core.value, core.summary) == ("crit", 1, "stack-demo-1: unhealthy")
 
 
+def test_health_from_the_status_text_of_an_older_engine(tmp_path: Path, docker: FakeDocker) -> None:
+    """Before Docker 29 the list has no Health object; its status text says it ("Up 3 hours (unhealthy)")."""
+    docker.set_status("stack-demo-1", "Up 3 hours (unhealthy)")
+    docker.set_status("stack-checker-1", "Up 5 seconds (health: starting)")
+    _, core = run(build(tmp_path, docker))  # the fixture's magicmirror says "(healthy)"
+    assert (core.level, core.value, core.summary) == ("crit", 1, "stack-demo-1: unhealthy")
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({"Health": {"Status": "unhealthy"}, "Status": "Up 1 hour (healthy)"}, "unhealthy"),  # the object wins
+        ({"Health": {"Status": "none"}, "Status": "Up 1 hour"}, "none"),
+        ({"Status": "Up 1 hour (healthy)"}, "healthy"),
+        ({"Status": "Up 2 seconds (health: starting)"}, "starting"),
+        ({"Status": "Up 1 hour"}, None),
+        ({}, None),
+    ],
+)
+def test_health_of(item: dict[str, Any], expected: str | None) -> None:
+    assert health_of(item) == expected
+
+
 def test_default_ignores_stopped_containers_but_a_paused_listed_one_is_crit(tmp_path: Path, docker: FakeDocker) -> None:
     docker.set_state("stack-demo-1", status="paused")
     _, core = run(build(tmp_path, docker, 'containers = ["stack-demo-1"]'))
@@ -89,8 +114,6 @@ def test_labels_select_containers(tmp_path: Path, docker: FakeDocker) -> None:
     assert (core.level, core.summary) == ("crit", "stack-demo-1: unhealthy")
     watched = [p for m, p in docker.requests if p.startswith("/containers/json")]
     assert any("filters=" in p and "status.watch" in p for p in watched)
-    # the inspect calls only covered the watched container
-    assert len([p for _, p in docker.requests if p.endswith("/json") and "/containers/" in p and "json?" not in p]) == 1
 
 
 def test_no_matching_container_is_fine(tmp_path: Path, docker: FakeDocker) -> None:
@@ -98,35 +121,72 @@ def test_no_matching_container_is_fine(tmp_path: Path, docker: FakeDocker) -> No
     assert (core.level, core.value, core.summary) == ("ok", 0, "no containers")
 
 
-# --- restarts: growth within the window, from a history kept in the check's memory
+# --- restarts: a container's `die` events within the window, kept in the check's memory
 
 
-def test_restart_growth_within_the_window_is_a_warning(tmp_path: Path, docker: FakeDocker) -> None:
+def events_asked(docker: FakeDocker) -> list[dict[str, list[str]]]:
+    return [parse_qs(urlsplit(p).query) for _, p in docker.requests if urlsplit(p).path == "/events"]
+
+
+def test_restarts_are_die_events_within_the_window(tmp_path: Path, docker: FakeDocker) -> None:
     spec = build(tmp_path, docker, "restarts = 3")
-    docker.set_state("stack-demo-1", restarts=40)  # restarted a lot before we ever looked: not growth
-    assert run(spec, T0)[1].level == "ok"
-    docker.set_state("stack-demo-1", restarts=43)  # 3 more: not more than 3
-    assert run(spec, T0 + 600)[1].level == "ok"
-    docker.set_state("stack-demo-1", restarts=45)  # 5 within the hour
-    core = run(spec, T0 + 1200)[1]
+    for minutes in (50, 40, 30):
+        docker.die("stack-demo-1", T0 - minutes * 60)
+    assert run(spec, T0)[1].level == "ok"  # 3: not more than 3
+    docker.die("stack-demo-1", T0 + 30)
+    docker.die("stack-demo-1", T0 + 40)
+    core = run(spec, T0 + 60)[1]
     assert (core.level, core.value, core.summary) == ("warn", 1, "stack-demo-1: 5 restarts in 1 h")
+
+
+def test_only_die_events_of_containers_are_asked_for(tmp_path: Path, docker: FakeDocker) -> None:
+    run(build(tmp_path, docker), T0)
+    (asked,) = events_asked(docker)
+    assert json.loads(asked["filters"][0]) == {"type": ["container"], "event": ["die"]}
+    assert int(asked["until"][0]) == int(T0)
+
+
+def test_each_run_asks_only_since_the_previous_one(tmp_path: Path, docker: FakeDocker) -> None:
+    """A short stretch each time, well within the few hundred recent events the daemon keeps."""
+    spec = build(tmp_path, docker, 'restart_window = "1h"')
+    run(spec, T0)
+    run(spec, T0 + 60)
+    first, second = events_asked(docker)
+    assert int(first["since"][0]) == int(T0 - 3600)  # nothing known yet: the whole window
+    assert int(second["since"][0]) == int(T0)  # then from where the previous question ended
+
+
+def test_an_event_in_the_boundary_second_is_counted_once(tmp_path: Path, docker: FakeDocker) -> None:
+    spec = build(tmp_path, docker, "restarts = 1")
+    docker.die("stack-demo-1", T0 - 100)
+    docker.die("stack-demo-1", T0)  # in the second where the first question ends and the second one starts
+    assert run(spec, T0)[1].level == "warn"  # 2 > 1
+    core = run(spec, T0 + 60)[1]
+    assert core.summary == "stack-demo-1: 2 restarts in 1 h"  # not 3
 
 
 def test_the_window_moves_on(tmp_path: Path, docker: FakeDocker) -> None:
     spec = build(tmp_path, docker, 'restarts = 3\nrestart_window = "30m"')
-    docker.set_state("stack-demo-1", restarts=0)
     run(spec, T0)
-    docker.set_state("stack-demo-1", restarts=5)
+    for seconds in range(10, 60, 10):
+        docker.die("stack-demo-1", T0 + seconds)
     core = run(spec, T0 + 300)[1]
     assert core.level == "warn" and core.summary == "stack-demo-1: 5 restarts in 30 min"
     assert run(spec, T0 + 1500)[1].level == "warn"  # still inside the window
     assert run(spec, T0 + 3000)[1].level == "ok"  # the restarts are older than 30 min now
 
 
+def test_old_events_outside_the_window_are_not_counted(tmp_path: Path, docker: FakeDocker) -> None:
+    for minutes in (90, 80, 70, 65):
+        docker.die("stack-demo-1", T0 - minutes * 60)
+    assert run(build(tmp_path, docker, "restarts = 1"), T0)[1].level == "ok"
+
+
 def test_crit_wins_over_warn_and_both_are_named(tmp_path: Path, docker: FakeDocker) -> None:
     spec = build(tmp_path, docker, "restarts = 1")
     run(spec, T0)
-    docker.set_state("stack-demo-1", restarts=5)
+    for seconds in (10, 20, 30, 40, 50):
+        docker.die("stack-demo-1", T0 + seconds)
     docker.set_state("stack-mosquitto-1", health="unhealthy")
     core = run(spec, T0 + 60)[1]
     assert core.level == "crit" and core.value == 2
@@ -138,45 +198,68 @@ def test_the_history_survives_a_restart_of_the_checker(tmp_path: Path, docker: F
     first = build(tmp_path, docker, "restarts = 3").check
     first.start(memory)
     first._now = lambda: T0
+    docker.die("stack-demo-1", T0 - 60)
+    docker.die("stack-demo-1", T0 - 30)
     first.run(10)
     assert memory.data is not None  # saved after the run
 
-    docker.set_state("stack-demo-1", restarts=6)
+    docker.events.clear()  # the daemon's backlog no longer has them: only the memory does
+    docker.die("stack-demo-1", T0 + 600)
+    docker.die("stack-demo-1", T0 + 900)
     again = build(tmp_path, docker, "restarts = 3").check  # a new process: the instance is new, the memory is not
     again.start(Memory(memory.data))
     again._now = lambda: T0 + 1800
     result = again.run(10)
-    assert result.level == "warn" and "6 restarts in 1 h" in (result.summary or "")
+    assert result.level == "warn" and "4 restarts in 1 h" in (result.summary or "")
 
 
-def test_without_memory_the_history_starts_fresh(tmp_path: Path, docker: FakeDocker) -> None:
-    """Past the ttl the scheduler hands over no data (continuity is broken): the first sighting is no growth."""
-    first = build(tmp_path, docker).check
-    memory = Memory()
-    first.start(memory)
-    first._now = lambda: T0
-    first.run(10)
-    docker.set_state("stack-demo-1", restarts=9)
-    again = build(tmp_path, docker).check
-    again.start(Memory(None))
-    again._now = lambda: T0 + 600
-    assert again.run(10).level == "ok"
+def test_without_memory_the_whole_window_is_asked_for(tmp_path: Path, docker: FakeDocker) -> None:
+    """Past the ttl the scheduler hands over no data (continuity is broken): ask for the whole window, as far back as
+    the daemon still has events."""
+    for minutes in (50, 40, 30, 20, 10):
+        docker.die("stack-demo-1", T0 - minutes * 60)
+    check = build(tmp_path, docker, "restarts = 3").check
+    check.start(Memory(None))
+    check._now = lambda: T0
+    assert check.run(10).level == "warn"
 
 
-def test_a_recreated_container_starts_its_history_again(tmp_path: Path, docker: FakeDocker) -> None:
-    spec = build(tmp_path, docker, "restarts = 1")
-    docker.set_state("stack-demo-1", restarts=10)
-    run(spec, T0)
-    docker.recreate("stack-demo-1", "ab" * 32)
-    assert run(spec, T0 + 60)[1].level == "ok"  # the count dropped to 0: no growth, no negative nonsense
-    docker.set_state("stack-demo-1", restarts=4)
-    assert run(spec, T0 + 120)[1].level == "warn"
-
-
-def test_a_corrupt_memory_is_ignored(tmp_path: Path, docker: FakeDocker) -> None:
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"restarts": {"stack-demo-1": {"id": "x", "samples": [[1, 2]]}}},  # the form before events
+        {"dies": "nonsense", "until": 1, "newest": 1},
+        {"dies": {"a": ["x"]}, "until": 1, "newest": 1},
+        {"dies": {}, "until": "soon", "newest": 1},
+    ],
+)
+def test_a_corrupt_or_old_memory_is_ignored(tmp_path: Path, docker: FakeDocker, data: dict[str, Any]) -> None:
     check = build(tmp_path, docker).check
-    check.start(Memory({"restarts": {"stack-demo-1": {"id": "x", "samples": "nonsense"}, "bad": 3}}))
+    check.start(Memory(data))
+    check._now = lambda: T0
     assert check.run(10).level == "ok"
+    assert int(events_asked(docker)[0]["since"][0]) == int(T0 - 3600)  # as without a memory
+
+
+def test_odd_events_are_skipped(tmp_path: Path, docker: FakeDocker) -> None:
+    docker.events += [
+        {"Type": "container", "Action": "die", "time": int(T0), "timeNano": "late"},
+        {"Type": "container", "Action": "die", "time": int(T0), "timeNano": int(T0 * 1e9), "Actor": {}},
+        {"Type": "container", "Action": "die", "time": int(T0), "timeNano": int(T0 * 1e9), "Actor": {"Attributes": {}}},
+    ]
+    assert run(build(tmp_path, docker, "restarts = 0"), T0)[1].level == "ok"
+
+
+# --- what the check reads: never a container's details (they hold its environment, so its passwords)
+
+
+def test_never_asks_for_a_containers_details(tmp_path: Path, docker: FakeDocker) -> None:
+    docker.die("stack-demo-1", T0 - 60)
+    docker.set_state("stack-mosquitto-1", health="unhealthy")
+    for extra in ("", 'containers = ["stack-demo-1", "db-old", "nope"]', 'labels = ["x=y"]'):
+        run(build(tmp_path, docker, extra), T0)
+    paths = {urlsplit(p).path for _, p in docker.requests}
+    assert paths == {"/containers/json", "/events"}
 
 
 def test_a_long_list_is_clipped(tmp_path: Path, docker: FakeDocker) -> None:
@@ -212,6 +295,20 @@ def test_an_unexpected_answer_is_a_failure(tmp_path: Path, docker: FakeDocker) -
     docker.refuse = 500
     outcome = execute(build(tmp_path, docker))
     assert isinstance(outcome, Failure) and outcome.summary == "Docker API answered HTTP 500"
+
+
+def test_a_proxy_that_refuses_events_says_which_path(tmp_path: Path, docker: FakeDocker) -> None:
+    """The events are the restarts: a proxy that doesn't allow /events is a failure, not a silent 'no restarts'."""
+    docker.refuse_paths["/events"] = 403
+    outcome = execute(build(tmp_path, docker))
+    assert isinstance(outcome, Failure)
+    assert outcome.summary == "Docker API refused the request (HTTP 403): is that path allowed?"
+
+
+def test_an_event_stream_that_isnt_json_is_a_failure(tmp_path: Path, docker: FakeDocker) -> None:
+    docker.events_body = '{"Type": "container", "Action": "die"}\n{"Type": "contai'  # cut off halfway
+    outcome = execute(build(tmp_path, docker))
+    assert isinstance(outcome, Failure) and outcome.summary == "the Docker API answer is not JSON"
 
 
 # --- config
@@ -274,7 +371,17 @@ def test_the_client_only_ever_sends_get(tmp_path: Path, docker: FakeDocker, monk
     assert docker.methods() == {"GET"}
     # and the client offers nothing else to call
     public = {name for name in dir(DockerClient) if not name.startswith("_")}
-    assert public == {"get_json"}
+    assert public == {"get_json", "get_json_stream"}
+
+
+def test_a_stream_of_json_values(docker: FakeDocker) -> None:
+    client = DockerClient(parse_endpoint(docker.url))
+    docker.die("stack-demo-1", T0)
+    docker.die("stack-checker-1", T0 + 1)
+    query = {"since": str(int(T0)), "until": str(int(T0) + 1)}
+    values = client.get_json_stream("/events", query, timeout=5)
+    assert [v["Actor"]["Attributes"]["name"] for v in values] == ["stack-demo-1", "stack-checker-1"]
+    assert client.get_json_stream("/events", {"since": "0", "until": "1"}, timeout=5) == []  # an empty stream
 
 
 def test_running_images_of_the_captured_fixture(docker: FakeDocker) -> None:

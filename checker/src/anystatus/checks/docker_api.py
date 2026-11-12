@@ -2,7 +2,8 @@
 
 - `docker = "unix:///var/run/docker.sock"` (HTTP over a unix socket) or `"tcp://host:2375"` (plain HTTP, e.g. a
   docker-socket-proxy). On Windows only tcp:// is possible (the checker reaches Docker through a socket proxy).
-- **Only GET can be sent**: `DockerClient.get_json` is the whole public surface and it hard-codes the method.
+- **Only GET can be sent**: `DockerClient.get_json` and `get_json_stream` are the whole public surface, and the one
+  request they share hard-codes the method.
 - No API version in the path: the daemon answers unversioned paths in its own current API version. A fixed
   /v1.41 would be refused by newer engines (Docker 29 dropped API versions older than 1.44), negotiating needs
   GET /version (which a socket proxy refuses unless VERSION=1), and every field read here is older than API 1.24.
@@ -98,6 +99,30 @@ class DockerClient:
         self._endpoint = endpoint
 
     def get_json(self, path: str, query: Mapping[str, str] | None = None, *, timeout: float) -> Any:
+        body = self._get(path, query, timeout)
+        try:
+            return json.loads(body.decode("utf-8"))
+        except ValueError as exc:
+            raise CheckFailure("the Docker API answer is not JSON") from exc
+
+    def get_json_stream(self, path: str, query: Mapping[str, str] | None = None, *, timeout: float) -> list[Any]:
+        """An answer that is a stream of JSON values one after the other (GET /events with an `until`, which ends it)."""
+        text = self._get(path, query, timeout).decode("utf-8", errors="replace")
+        decoder = json.JSONDecoder()
+        values: list[Any] = []
+        index = 0
+        while True:
+            while index < len(text) and text[index].isspace():
+                index += 1
+            if index >= len(text):
+                return values
+            try:
+                value, index = decoder.raw_decode(text, index)
+            except ValueError as exc:
+                raise CheckFailure("the Docker API answer is not JSON") from exc
+            values.append(value)
+
+    def _get(self, path: str, query: Mapping[str, str] | None, timeout: float) -> bytes:
         target = path
         if query:
             target += "?" + "&".join(f"{quote(k)}={quote(v)}" for k, v in query.items())
@@ -127,10 +152,7 @@ class DockerClient:
             raise CheckFailure(f"Docker API refused the request (HTTP {status}): is that path allowed?")
         if status != 200:
             raise CheckFailure(f"Docker API answered HTTP {status}")
-        try:
-            return json.loads(body.decode("utf-8"))
-        except ValueError as exc:
-            raise CheckFailure("the Docker API answer is not JSON") from exc
+        return body
 
 
 def _read(response: http.client.HTTPResponse, deadline: float) -> bytes:

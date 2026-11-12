@@ -418,25 +418,86 @@ containers = ["db", "web", "backup"]      # by name; or `labels = ["status.watch
 restarts = 3                              # more restarts than this within `restart_window` (default 1h) is amber
 ```
 
-Reads the Docker API (a few `GET`s, plain HTTP over the socket, no Docker SDK). Per container:
+Reads the Docker API (a few `GET`s, plain HTTP over the socket, no Docker SDK): the container list
+(`/containers/json`) and the event log (`/events`), **never a container's details** (`/containers/{id}/json`, which
+hold its environment: see [Docker access](#docker-access-and-what-it-can-read)). Per container:
 
 - A listed container that is missing or not running is `crit`.
 - A container that is `unhealthy` is `crit`. One that is still `starting` counts as fine; a `show_after` for `crit`
-  absorbs a slow start.
+  absorbs a slow start. Health comes from the list's `Health` (Docker 29), or else from its status text
+  ("Up 3 hours (unhealthy)").
 - Restarting more often than `restarts` within the window is `warn`. A container that keeps restarting does serve
-  in between, but something is wrong with it.
+  in between, but something is wrong with it. A restart is a `die` event of the container. Each run asks for the
+  events since the previous run (`since`/`until`, only `die` of containers): a short stretch, well within the few
+  hundred recent events the daemon keeps. The times are kept in the check's memory for the window, so the window
+  survives a checker restart within the [continuity rule](#memory-the-sqlite-file). Without that memory (a first
+  start, `once`) the run asks for the whole window, as far back as the daemon still has events.
 
 The value is the number of containers that aren't fine. The summary names them ("backup: unhealthy; web: 5 restarts
 in 1 h"), and the level is the worst of them. One check covers a set of containers, so ten containers don't make
 ten cards. Make separate checks if they should.
 
-**Read-only access** (decided, see design.md): use [docker-socket-proxy] with only `CONTAINERS=1` and `IMAGES=1`, which
-refuses every `POST`, rather than mounting the socket. Mounting `/var/run/docker.sock:ro` does *not* make the API
-read-only, and the checker README says so plainly. The checks only ever send `GET`, without an API version in the
-path (the engine answers in its own current one). On Windows there are no unix sockets to reach: `docker` must be a
-`tcp://` address (the proxy).
+### Docker access, and what it can read
 
-[docker-socket-proxy]: https://github.com/Tecnativa/docker-socket-proxy
+For `docker_status`, `docker_updates` and `image_vulns` (and Trivy, which reads local images through `DOCKER_HOST`).
+
+**Two different risks.** The socket is root on its host: anything that can send it a `POST` can start a privileged
+container, and mounting it `:ro` changes nothing about that (`:ro` protects the socket *file*, not the API). And
+**reading is not harmless**: a container's details (`GET /containers/{id}/json`) include its whole environment, and
+most setups keep their passwords there. Tested 2026-11-12 with a throwaway container holding a fake secret: through
+a proxy that allows whole sections (Tecnativa's `docker-socket-proxy` and linuxserver's fork, `CONTAINERS=1`,
+`IMAGES=1`) its details answered with the secret, while its files (`/archive`), logs and filesystem (`/export`)
+answered `403` and the container list (`/containers/json`) holds no environment.
+
+**So the checks never read a container's details**, and the proxy refuses them. What the checker and Trivy use,
+and nothing else (the paths of Docker 29; Trivy's carry an API version, the checker's don't):
+
+| Method, path | Used by |
+|---|---|
+| `GET /containers/json` | `docker_status` (state, health), `docker_updates` and `image_vulns` (the running images) |
+| `GET /events` | `docker_status` (restarts: `die` events, with name and exit code, no environment) |
+| `GET /images/json`, `GET /images/{name}/json` | `docker_updates`, `image_vulns` (tags, digests, layers, the base image) |
+| `HEAD /_ping`, `GET /images/{name}/json`, `GET /images/{name}/history`, `GET /images/get` | Trivy reading a local image (found by logging a real scan through a proxy, Trivy 0.76.1) |
+
+An image's details hold the `ENV` lines of its Dockerfile, not what a container was started with. `GET /images/get`
+exports an image (its layers): whatever is baked into the image, so never bake a password into one.
+
+**The proxy:** [wollomatic/socket-proxy], which takes a regular expression of allowed paths per method (it adds `^`
+and `$` itself) and refuses every other method, path and client:
+
+```
+-allowGET=(/v1\.[0-9]+)?/(containers/json|events|images/json|images/.+/json|images/.+/history|images/get)
+-allowHEAD=(/v1\.[0-9]+)?/_ping
+-allowfrom=checker
+```
+
+Tested 2026-11-12 (wollomatic 1.13.2, Docker 29): every path above `200`, Trivy scans a local image through it; a
+container's details, files, logs and filesystem, `/volumes`, `/info` and the versioned
+`/v1.56/containers/{id}/json` answer `403`; `POST /containers/create` `405`. A path that tries to climb out of
+`/images/` (`/images/x/../../containers/{id}/json`, sent as is, or with `%2F..%2F`) passes the pattern, but Docker
+answers it with an empty `301` redirect to the real path (no body), which the proxy then refuses. Every refused request is logged by
+the proxy as a warning, so a check that suddenly needs another path shows there.
+
+It runs as its own user and needs the socket's group to open it: 0 on Docker Desktop, the `docker` group on Linux,
+whose number differs per machine (`stat -c %g /var/run/docker.sock`). Tecnativa's original isn't recommended: its
+images hadn't been rebuilt in a long time (9 HIGH/CRITICAL findings, all fixed in Alpine, on 2026-11-12), and
+neither it nor linuxserver's fork can tell the container list from a container's details.
+
+**What the rest of the setup must do:**
+
+- The proxy gets **no `ports:`**: only a network of its own (`internal: true`) shared with the checker. Never the
+  host's network, the LAN or the internet. On another host (a checker watching several machines), reachable only
+  from the checker's machine: a firewall rule, or a VPN with an access rule.
+- The checker and Trivy run with this access: pin both (Trivy by digest too: its releases were hijacked in March
+  2026, CVE-2026-33634), and run the checker as an unprivileged user.
+- Passwords in files (`*_FILE` variables, Docker secrets) instead of the environment are not in a container's
+  details, even for a client that could read them.
+- The checker never logs an answer's body: a failed request logs only the error's type and message, at debug level,
+  with secrets masked.
+
+On Windows there are no unix sockets to reach: `docker` must be a `tcp://` address (the proxy).
+
+[wollomatic/socket-proxy]: https://github.com/wollomatic/socket-proxy
 
 ### `docker_updates`
 
