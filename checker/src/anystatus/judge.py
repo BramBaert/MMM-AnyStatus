@@ -14,7 +14,7 @@ from anystatus.timeutil import format_duration
 if TYPE_CHECKING:
     from anystatus.config import CheckSpec, Limits
 
-MAX_SUMMARY = 200
+MAX_SUMMARY = 400
 
 
 def level_for(value: float, limits: Limits) -> Level:
@@ -38,9 +38,10 @@ class _Fields(dict[str, str]):
 
 
 def _clip(text: str | None) -> str | None:
+    """Line breaks stay (one item per line, SPEC `summary`); other runs of whitespace become one space."""
     if text is None:
         return None
-    text = " ".join(text.split())
+    text = "\n".join(line for line in (" ".join(raw.split()) for raw in text.splitlines()) if line)
     return text if len(text) <= MAX_SUMMARY else text[: MAX_SUMMARY - 1] + "…"
 
 
@@ -51,7 +52,7 @@ def _number(value: float) -> str:
 def judge(spec: CheckSpec, outcome: Outcome) -> Core:
     """The level and text a run reports. Failures are always `unknown`."""
     if isinstance(outcome, Failure):
-        return Core("unknown", _clip(outcome.summary))
+        return Core("unknown", _clip(" ".join(outcome.summary.split())))  # an error message: one line
 
     fields = _Fields()
     if isinstance(outcome, Reading):

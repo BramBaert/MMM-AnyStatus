@@ -320,7 +320,7 @@ class Scheduler:
                 spec.id,
                 previous or "?",
                 reported.core.level,
-                f" ({reported.core.summary})" if reported.core.summary else "",
+                f" ({reported.core.summary.replace(chr(10), '; ')})" if reported.core.summary else "",  # one log line
             )
         if self.store:
             try:

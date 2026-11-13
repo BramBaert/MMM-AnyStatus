@@ -169,7 +169,7 @@ class DockerStatus(Check):
         if len(ordered) > MAX_NAMES:
             shown.append(f"+{len(ordered) - MAX_NAMES} more")
         level_name = "crit" if ordered[0][1][0] == 0 else "warn"
-        return Observation(level=level_name, summary="; ".join(shown), value=len(problems))
+        return Observation(level=level_name, summary="\n".join(shown), value=len(problems))
 
     def _record_dies(self, now: float, left: Callable[[], float]) -> None:
         """Add the `die` events since the last run (or of the whole window) and forget those older than the window."""

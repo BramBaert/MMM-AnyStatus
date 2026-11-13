@@ -68,6 +68,7 @@
 	grid-column: 1;
 	font-size: 0.8em;
 	color: var(--color-text, #999);
+	white-space: pre-line; /* a line break in a summary separates items (SPEC) */
 }
 /* Member names of a collapsed group, coloured by their own level. */
 .anystatus .as-name[data-level="crit"] { color: var(--as-crit); }

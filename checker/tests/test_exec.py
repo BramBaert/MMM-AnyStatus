@@ -61,6 +61,12 @@ def test_a_summary_template_applies(tmp_path: Path) -> None:
     assert judge(spec, execute(spec)).summary == "took 0.25 s"
 
 
+def test_a_summary_keeps_its_line_breaks_and_drops_empty_lines(tmp_path: Path) -> None:
+    spec = spec_for(tmp_path, "")
+    outcome = Observation(level="warn", summary="  first   item \n\n\nsecond\t item\n   \nthird")
+    assert judge(spec, outcome).summary == "first item\nsecond item\nthird"
+
+
 def test_no_output_at_all(tmp_path: Path) -> None:
     ok = execute(spec_for(tmp_path, "import sys\nsys.exit(0)\n"))
     crit = execute(spec_for(tmp_path, "import sys\nsys.exit(2)\n"))

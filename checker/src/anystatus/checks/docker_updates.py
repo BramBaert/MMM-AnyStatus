@@ -176,7 +176,7 @@ class DockerUpdates(Check):
             text = f"all {current} image{'s' if current != 1 else ''} up to date" if current else "no images to check"
             names = ""
         if notes:
-            text += "; " + "; ".join(notes)
+            text += "\n" + "\n".join(notes)
         return Reading(value=float(len(updates)), text=text, fields={"names": names})
 
     def _check_image(self, image: RunningImage, registry: RegistryClient, store: ImageStore, left: Callable[[], float]) -> _Verdict:

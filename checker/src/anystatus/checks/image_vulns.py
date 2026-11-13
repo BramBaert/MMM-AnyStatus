@@ -385,9 +385,9 @@ class ImageVulns(Check):
             if len(entries) > MAX_NAMES:
                 rest = len(entries) - MAX_NAMES
                 shown.append(f"+{rest} more image{'s' if rest > 1 else ''}")
-            text = "; ".join(shown)
+            text = "\n".join(shown)
         # A blind spot belongs on the card; "newer build not checked" goes to the page only (the card stays short).
-        text += "".join(f"; {n}" for n in notes if "not scanned" in n)
+        text += "".join(f"\n{n}" for n in notes if "not scanned" in n)
         return Observation(level="ok" if not due else level, summary=text, value=value)
 
     def _classify(self, image: RunningImage, target: str, vulns: list[Vuln], run: _Run) -> dict[tuple[str, str], str]:

@@ -433,8 +433,8 @@ hold its environment: see [Docker access](#docker-access-and-what-it-can-read)).
   survives a checker restart within the [continuity rule](#memory-the-sqlite-file). Without that memory (a first
   start, `once`) the run asks for the whole window, as far back as the daemon still has events.
 
-The value is the number of containers that aren't fine. The summary names them ("backup: unhealthy; web: 5 restarts
-in 1 h"), and the level is the worst of them. One check covers a set of containers, so ten containers don't make
+The value is the number of containers that aren't fine. The summary names them, one per line ("backup: unhealthy",
+"web: 5 restarts in 1 h"), and the level is the worst of them. One check covers a set of containers, so ten containers don't make
 ten cards. Make separate checks if they should.
 
 ### Docker access, and what it can read
@@ -605,12 +605,12 @@ existed.
   [continuity rule](#memory-the-sqlite-file)). A new critical doesn't inherit the age of an old one. A CVE that is no
   longer in a scanned image is forgotten; if it comes back, it is new. An image that couldn't be scanned keeps its
   dates. The age goes on when a CVE changes class (it was found when it was found).
-- The card's level is the worst over all CVEs. Its summary has one entry per image with something due: of that
+- The card's level is the worst over all CVEs. Its summary has one line per image with something due: of that
   image's CVEs at its worst level, the highest severity, then the class with the most such CVEs (ties: `update`,
-  `rebuild`, `waiting`, `no_fix`), e.g. "backrest: 3 critical, waiting for upstream fix; alpine: 3 critical, waiting
-  for upstream fix". The worst image comes first (level, severity, number of CVEs). Cards are narrow, so after 3
-  images the rest is counted ("+2 more images"), as `docker_status` and `docker_updates` do; plus "; 1 not scanned
-  (…)" when an image couldn't be scanned (a blind spot). The value is the number of CVEs that are due (amber or red). Nothing due: "nothing due in 5 images".
+  `rebuild`, `waiting`, `no_fix`), e.g. "backrest: 3 critical, waiting for upstream fix" and "alpine: 3 critical,
+  waiting for upstream fix". The worst image comes first (level, severity, number of CVEs). Cards are narrow, so
+  after 3 images the rest is counted ("+2 more images"), as `docker_status` and `docker_updates` do; plus a line
+  "1 not scanned (…)" when an image couldn't be scanned (a blind spot). The value is the number of CVEs that are due (amber or red). Nothing due: "nothing due in 5 images".
 - **The full list** is on the checker's page [`/vulns`](#serving).
 - **Known to be exploited (CISA's KEV list):** Trivy's report doesn't say (checked on Trivy 0.76.2's JSON: no such
   field; only descriptions mention exploits). Trivy's maintainers have open requests for it (discussions #10706,

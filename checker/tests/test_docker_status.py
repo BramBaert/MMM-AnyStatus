@@ -62,7 +62,7 @@ def test_listed_containers_missing_or_not_running_are_crit(tmp_path: Path, docke
     spec = build(tmp_path, docker, 'containers = ["stack-demo-1", "db-old", "nope"]')
     _, core = run(spec)
     assert core.level == "crit" and core.value == 2
-    assert core.summary == "db-old: not running (exited); nope: missing"
+    assert core.summary == "db-old: not running (exited)\nnope: missing"
 
 
 def test_a_listed_container_that_runs_is_fine(tmp_path: Path, docker: FakeDocker) -> None:
@@ -190,7 +190,7 @@ def test_crit_wins_over_warn_and_both_are_named(tmp_path: Path, docker: FakeDock
     docker.set_state("stack-mosquitto-1", health="unhealthy")
     core = run(spec, T0 + 60)[1]
     assert core.level == "crit" and core.value == 2
-    assert core.summary == "stack-mosquitto-1: unhealthy; stack-demo-1: 5 restarts in 1 h"
+    assert core.summary == "stack-mosquitto-1: unhealthy\nstack-demo-1: 5 restarts in 1 h"
 
 
 def test_the_history_survives_a_restart_of_the_checker(tmp_path: Path, docker: FakeDocker) -> None:
@@ -268,8 +268,8 @@ def test_a_long_list_is_clipped(tmp_path: Path, docker: FakeDocker) -> None:
         docker.set_state(item["Names"][0].lstrip("/"), health="unhealthy", status="running")
     _, core = run(build(tmp_path, docker))
     assert core.level == "crit" and core.value == 9
-    assert core.summary is not None and core.summary.endswith("; +3 more")
-    assert len(core.summary or "") <= 200
+    assert core.summary is not None and core.summary.endswith("\n+3 more")
+    assert len(core.summary or "") <= 400
 
 
 # --- failures

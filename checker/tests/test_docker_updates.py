@@ -199,13 +199,13 @@ def test_a_pruned_base_is_said_in_the_summary(tmp_path: Path, docker: FakeDocker
     docker.add_container("web", f"{reg.host}/acme/web:latest", web_id, None)
     reg.add("acme/web", "latest", manifest=digest("web-1"))
     _, core = run(build(tmp_path, docker))
-    assert (core.level, core.summary) == ("ok", "all 1 image up to date; anystatus-localtest: base image not found (pruned?)")
+    assert (core.level, core.summary) == ("ok", "all 1 image up to date\nanystatus-localtest: base image not found (pruned?)")
     assert "unknown" not in (core.summary or "")
 
 
 def test_a_locally_built_image_without_layers_has_no_base(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     docker.add_container("mine", "mine:dev", "sha256:" + "2" * 64, None)
-    assert run(build(tmp_path, docker))[1].summary == "no images to check; mine: base image not found (pruned?)"
+    assert run(build(tmp_path, docker))[1].summary == "no images to check\nmine: base image not found (pruned?)"
 
 
 # --- versions
@@ -284,7 +284,7 @@ def test_the_tag_list_is_bounded(tmp_path: Path, docker: FakeDocker, reg: FakeRe
     monkeypatch.setattr(registry_api, "MAX_TAG_PAGES", 3)
     _, core = run(build(tmp_path, docker))
     assert core.level == "ok"
-    assert core.summary == "all 1 image up to date; tag list cut after 3 pages"
+    assert core.summary == "all 1 image up to date\ntag list cut after 3 pages"
     assert len([p for _, p in reg.requests if "/tags/list" in p]) == 3
 
 
@@ -297,7 +297,7 @@ def test_an_image_started_by_digest_is_skipped(tmp_path: Path, docker: FakeDocke
     add(docker, reg, "db", "acme/db", "latest", digest("db-1"))
     reg.add("acme/db", "latest", manifest=digest("db-1"))
     _, core = run(build(tmp_path, docker))
-    assert core.level == "ok" and core.summary == "all 1 image up to date; 1 pinned by digest, skipped"
+    assert core.level == "ok" and core.summary == "all 1 image up to date\n1 pinned by digest, skipped"
     assert not any("/acme/web/" in p for _, p in reg.requests)
 
 
@@ -333,7 +333,7 @@ def test_one_registry_down_makes_that_image_unknown(tmp_path: Path, docker: Fake
         down.status = 503
         _, core = run(build(tmp_path, docker))
     assert core.level == "warn" and core.value == 1
-    assert core.summary == "1 image: web (rebuilt); 1 unknown (registry did not answer): api"
+    assert core.summary == "1 image: web (rebuilt)\n1 unknown (registry did not answer): api"
 
 
 def test_one_registry_down_and_nothing_else_to_report(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
@@ -343,7 +343,7 @@ def test_one_registry_down_and_nothing_else_to_report(tmp_path: Path, docker: Fa
         reg.add("acme/web", "latest", manifest=digest("web-1"))
         down.status = 500
         _, core = run(build(tmp_path, docker))
-    assert core.level == "ok" and core.summary == "all 1 image up to date; 1 unknown (registry did not answer): api"
+    assert core.level == "ok" and core.summary == "all 1 image up to date\n1 unknown (registry did not answer): api"
 
 
 def test_no_registry_answering_is_unknown(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:

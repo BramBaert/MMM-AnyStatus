@@ -323,7 +323,7 @@ def test_the_card_names_every_image_worst_first(tmp_path: Path, docker: FakeDock
         outputs[ref] = trivy_json([(f"CVE-2026-{i}", severity, "2.0") for i, severity in enumerate(severities, 1)])
     spec = build(tmp_path, docker, write_fake_trivy(tmp_path, outputs), SCHEDULE)
     _, core = run(spec)
-    expected = "b: 3 critical, waiting for upstream fix; a: 1 critical, waiting for upstream fix; c: 2 high, waiting for upstream fix; +1 more image"
+    expected = "b: 3 critical, waiting for upstream fix\na: 1 critical, waiting for upstream fix\nc: 2 high, waiting for upstream fix\n+1 more image"
     assert (core.level, core.summary, core.value) == ("warn", expected, 7)
 
 
@@ -386,7 +386,7 @@ def test_without_a_schedule_it_counts_fixed_critical_and_high(tmp_path: Path, do
     _, core = run(build(tmp_path, docker, command))
     assert (core.level, core.value) == ("crit", 4)
     # Docker can't say where these came from (no Identity, no RepoDigests, no layers): built here, base unknown
-    assert core.summary == "grafana: 2 critical, fixed, please rebuild image; nginx: 1 high, fixed, please rebuild image"
+    assert core.summary == "grafana: 2 critical, fixed, please rebuild image\nnginx: 1 high, fixed, please rebuild image"
 
 
 def test_a_fixable_critical_from_the_captured_alpine_report(tmp_path: Path, docker: FakeDocker) -> None:
@@ -533,7 +533,7 @@ def test_a_failing_scan_leaves_that_image_unscanned_and_keeps_its_dates(tmp_path
     write_fake_trivy(tmp_path, outputs)
     _, core = run(at(spec, START + DAY))
     assert (core.level, core.value) == ("warn", 1)
-    assert core.summary == "b: 1 high, fixed, please rebuild image; 1 not scanned (trivy failed)"
+    assert core.summary == "b: 1 high, fixed, please rebuild image\n1 not scanned (trivy failed)"
     assert "a:1|CVE-2024-9" in spec.check.found  # not seen this time, but not gone either
 
 

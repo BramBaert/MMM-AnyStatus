@@ -102,3 +102,14 @@ def test_overview_and_404(served) -> None:  # type: ignore[no-untyped-def]
     assert b"a.ok" in body
     assert get(port, "/nope")[0] == 404
     assert get(port, "/results/")[0] == 404
+
+
+def test_overview_shows_a_multi_line_summary_on_one_line(served) -> None:  # type: ignore[no-untyped-def]
+    w, port = served
+    w.sched.tick()
+    w.launcher.complete("a.ok", Observation(level="warn", summary="first\nsecond\nthird"), w.clock)
+    w.sched.tick()
+    body = get(port, "/")[2].decode("utf-8")
+    assert "first; second; third" in body
+    assert "first\nsecond" not in body
+    assert json.loads(get(port, "/results")[2])["results"][0]["summary"] == "first\nsecond\nthird"

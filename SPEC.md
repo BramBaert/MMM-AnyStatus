@@ -60,7 +60,7 @@ Results travel in one JSON document (UTF-8, `Content-Type: application/json`):
 | `ttl` | number | yes | Seconds after `ts` that the result may be believed. Greater than 0. |
 | `label` | string | no | What the display shows. Defaults to `id`. SHOULD be at most about 40 characters. |
 | `group` | string | no | For collapsing many results into one count per group. |
-| `summary` | string | no | The reason, short: "last backup 3 days ago". SHOULD be given for any level other than `ok`, and SHOULD be at most about 80 characters. |
+| `summary` | string | no | The reason, short: "last backup 3 days ago". SHOULD be given for any level other than `ok`, and SHOULD be at most about 80 characters per line. MAY hold several lines separated by `\n`, one item per line (e.g. one per container); a consumer SHOULD show each on its own line, or, where it shows one line only, join them with `; `. |
 | `value` | number or string | no | The measured value, for display. |
 | `unit` | string | no | Unit of `value`: `"days"`, `"%"`, `"ms"`. |
 | `since` | string (time) | no | When the check got its current level. MUST NOT be later than `ts`. |
