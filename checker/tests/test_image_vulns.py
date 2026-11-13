@@ -315,6 +315,18 @@ def test_a_class_with_only_medium_counts_high_and_critical_on_its_line(tmp_path:
     assert (core.level, core.summary, core.value) == ("crit", "db: 1 critical, waiting for upstream fix", 3)
 
 
+def test_the_card_names_every_image_worst_first(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    outputs = {}
+    for name, severities in (("a", ["CRITICAL"]), ("b", ["CRITICAL"] * 3), ("c", ["HIGH"] * 2), ("d", ["HIGH"])):
+        ref = pulled(docker, reg, f"acme/{name}", "1", f"{name}-1")
+        reg.add(f"acme/{name}", "1", index=digest(f"{name}-1"))  # no newer build: every fix is waiting
+        outputs[ref] = trivy_json([(f"CVE-2026-{i}", severity, "2.0") for i, severity in enumerate(severities, 1)])
+    spec = build(tmp_path, docker, write_fake_trivy(tmp_path, outputs), SCHEDULE)
+    _, core = run(spec)
+    expected = "b: 3 critical, waiting for upstream fix; a: 1 critical, waiting for upstream fix; c: 2 high, waiting for upstream fix; +1 more image"
+    assert (core.level, core.summary, core.value) == ("warn", expected, 7)
+
+
 def test_a_listed_never_stays_ignored(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     schedule = '[check.schedule.waiting]\nMEDIUM = { warn = "0d", crit = "10d" }\nCRITICAL = { warn = "never", crit = "never" }\n'
     spec = waiting_only(tmp_path, docker, reg, schedule)
@@ -374,7 +386,7 @@ def test_without_a_schedule_it_counts_fixed_critical_and_high(tmp_path: Path, do
     _, core = run(build(tmp_path, docker, command))
     assert (core.level, core.value) == ("crit", 4)
     # Docker can't say where these came from (no Identity, no RepoDigests, no layers): built here, base unknown
-    assert core.summary == "grafana: 2 critical, fixed, please rebuild image"
+    assert core.summary == "grafana: 2 critical, fixed, please rebuild image; nginx: 1 high, fixed, please rebuild image"
 
 
 def test_a_fixable_critical_from_the_captured_alpine_report(tmp_path: Path, docker: FakeDocker) -> None:

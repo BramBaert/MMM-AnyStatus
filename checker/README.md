@@ -313,8 +313,9 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   CRITICAL): a class that lists only MEDIUM counts HIGH and CRITICAL on MEDIUM's line. Below the lowest listed one, a
   severity doesn't count; to not count a *higher* one, list it as `{ warn = "never", crit = "never" }`. UNKNOWN (not
   rated by Trivy) counts only when it is listed itself, and passes nothing on. Without a `schedule`, a fixed `CRITICAL` is red and a
-  fixed `HIGH` amber at once, whatever the class, and what has no fix doesn't count. The card names the image,
-  count, severity and class of the worst; the value is the number of CVEs that are due. **The full list** (level,
+  fixed `HIGH` amber at once, whatever the class, and what has no fix doesn't count. The card names every
+  image with something due, worst first (each with the count, severity and class of its worst; after 3 images
+  "+N more images"); the value is the number of CVEs that are due. **The full list** (level,
   severity, image, CVE, package, installed and fixed version, class, first found) is on the checker's own page
   **`/vulns`**, next to `/results`, since a display can't be clicked, together with each class's schedule as it
   applies (inherited lines marked "as MEDIUM: …"). Trivy's report doesn't say whether a CVE is

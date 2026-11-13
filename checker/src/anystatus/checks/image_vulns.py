@@ -76,6 +76,7 @@ DEFAULT_SCHEDULE: dict[str, dict[str, tuple[float, float]]] = {
 }
 MAX_OUTPUT = 32 * 1024 * 1024  # bytes of Trivy's JSON kept per image
 _LEVEL_RANK = {"ok": 0, "warn": 1, "crit": 2}
+MAX_NAMES = 3  # images named on the card (their entries are long); the rest is counted, every one is on /vulns
 
 
 def _now() -> datetime:
@@ -364,14 +365,27 @@ class ImageVulns(Check):
             text = f"nothing due in {images} {noun}"
         else:
             level = max((f.level for f in due), key=_LEVEL_RANK.__getitem__)
-            top = [f for f in due if f.level == level]
-            severity = min((f.vuln.severity for f in top), key=_severity_rank)
-            groups: dict[tuple[str, str], set[str]] = {}
-            for f in top:
-                if f.vuln.severity == severity:
-                    groups.setdefault((f.image, f.klass), set()).add(f.vuln.id)
-            (image, klass), cves = min(groups.items(), key=lambda g: (-len(g[1]), CLASSES.index(g[0][1]), g[0][0]))
-            text = f"{image}: {len(cves)} {severity.lower()}, {CARD_TEXT[klass]}"
+            # One entry per image: its biggest group at its own worst level and severity. Worst image first.
+            entries: list[tuple[tuple[int, int, int, int, str], str]] = []
+            for reference in {f.reference for f in due}:
+                mine = [f for f in due if f.reference == reference]
+                worst = max((f.level for f in mine), key=_LEVEL_RANK.__getitem__)
+                top = [f for f in mine if f.level == worst]
+                severity = min((f.vuln.severity for f in top), key=_severity_rank)
+                groups: dict[str, set[str]] = {}
+                for f in top:
+                    if f.vuln.severity == severity:
+                        groups.setdefault(f.klass, set()).add(f.vuln.id)
+                klass, cves = min(groups.items(), key=lambda g: (-len(g[1]), CLASSES.index(g[0])))
+                image = mine[0].image
+                order = (-_LEVEL_RANK[worst], _severity_rank(severity), -len(cves), CLASSES.index(klass), image)
+                entries.append((order, f"{image}: {len(cves)} {severity.lower()}, {CARD_TEXT[klass]}"))
+            entries.sort()
+            shown = [entry for _, entry in entries[:MAX_NAMES]]
+            if len(entries) > MAX_NAMES:
+                rest = len(entries) - MAX_NAMES
+                shown.append(f"+{rest} more image{'s' if rest > 1 else ''}")
+            text = "; ".join(shown)
         # A blind spot belongs on the card; "newer build not checked" goes to the page only (the card stays short).
         text += "".join(f"; {n}" for n in notes if "not scanned" in n)
         return Observation(level="ok" if not due else level, summary=text, value=value)

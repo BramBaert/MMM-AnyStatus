@@ -605,10 +605,12 @@ existed.
   [continuity rule](#memory-the-sqlite-file)). A new critical doesn't inherit the age of an old one. A CVE that is no
   longer in a scanned image is forgotten; if it comes back, it is new. An image that couldn't be scanned keeps its
   dates. The age goes on when a CVE changes class (it was found when it was found).
-- The card's level is the worst over all CVEs. Its summary names the worst: of the CVEs at that level, the highest
-  severity, then the image and class with the most such CVEs (ties: `update`, `rebuild`, `waiting`, `no_fix`).
-  Cards are narrow, so that is all it says, plus "; 1 not scanned (…)" when an image couldn't be scanned (a blind
-  spot). The value is the number of CVEs that are due (amber or red). Nothing due: "nothing due in 5 images".
+- The card's level is the worst over all CVEs. Its summary has one entry per image with something due: of that
+  image's CVEs at its worst level, the highest severity, then the class with the most such CVEs (ties: `update`,
+  `rebuild`, `waiting`, `no_fix`), e.g. "backrest: 3 critical, waiting for upstream fix; alpine: 3 critical, waiting
+  for upstream fix". The worst image comes first (level, severity, number of CVEs). Cards are narrow, so after 3
+  images the rest is counted ("+2 more images"), as `docker_status` and `docker_updates` do; plus "; 1 not scanned
+  (…)" when an image couldn't be scanned (a blind spot). The value is the number of CVEs that are due (amber or red). Nothing due: "nothing due in 5 images".
 - **The full list** is on the checker's page [`/vulns`](#serving).
 - **Known to be exploited (CISA's KEV list):** Trivy's report doesn't say (checked on Trivy 0.76.2's JSON: no such
   field; only descriptions mention exploits). Trivy's maintainers have open requests for it (discussions #10706,
