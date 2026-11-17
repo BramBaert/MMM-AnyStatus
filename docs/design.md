@@ -267,6 +267,31 @@ What was decided then is built and described above ("From the first real deploym
 
 Not planned yet; how they play out in practice decides their priority.
 
+- **"base image not found" for self-built images** (seen on a real server 2026-11-13: every self-built image, five
+  on the server and one on a second host). **Decided (Bram, 2026-11-13): don't report it for self-built images**:
+  they have no upstream, we build them. Their *base images* must still be checked for rebuilds. **TODO:** how, when
+  the base isn't found locally (until then a rebuilt base goes unseen for those images; `image_vulns` likewise can't
+  tell the base's CVEs from the Dockerfile's, so every fixable one becomes "rebuild"). **Seen 2026-11-13:** setuptools
+  70.3.0 (CVE-2025-47273, HIGH) marked "rebuild" in an image built `FROM python:3.13-slim`. It is pip's vendored copy
+  (`pip/_vendor/vendor.txt` says `setuptools==70.3.0`; no `setuptools` dist-info anywhere), in the base's own layer
+  (Trivy's `Layer.Digest` was the base's), and the newest build of `python:3.13-slim` still has it: a rebuild with
+  `--pull` changes nothing. Right class: *waiting*. So until the base is found, "rebuild" can mean "nothing to do".
+  Also worth saying in the user docs: a rebuild fixes a package installed from a lock file (`uv.lock`) only after the
+  lock is upgraded; *rebuild* for such a package means "upgrade the lock, then rebuild". **Cause unknown:** not simply BuildKit keeping
+  `FROM` images out of the image list, since `python:3.13-alpine` and `python:3.14-alpine` were listed there.
+  **TODO:** reproduce on Docker Desktop first (build an image the way `docker compose build` does, run
+  `find_base`), then fix. A candidate fix if the base can't be found locally: the Dockerfile names its base once
+  (an `ARG` used by `FROM` and by the label `org.opencontainers.image.base.name`), and the checker compares the
+  base's current layers in the registry with the image's bottom layers. Rejected: having the deploy script pull
+  every base (it would have to parse the `FROM` lines).
+- **A green card waiting for a worse level keeps its old text** (seen 2026-11-13: `docker.updates`, waiting 14 days
+  for `warn`, still showed text from the checker version before, with `ts` refreshed). `step()` in `judge.py` keeps
+  the previous green `core` whole ("green stays as it was"), against its own docstring ("with this run's summary and
+  value"). **TODO:** show this run's summary and value at level `ok` (`replace(new, level="ok")`), and update the
+  tests that expect the frozen text.
+- **`1 not scanned (trivy failed)`** on the second host's `image_vulns` (2026-11-13). **TODO:** which image
+  (probably the self-built one above) and Trivy's error (in the debug log).
+
 - **Seen and accepted, with an end date** (Bram, 2026-11-12): a list in the config, e.g. `accept = [{ cve = "CVE-…",
   image = "mariadb", until = "2027-01-31", why = "…" }]`. An accepted CVE doesn't count until its date, then it is
   back. It keeps the display calm without a blind spot, and the reason is written down. Trivy's `.trivyignore` has

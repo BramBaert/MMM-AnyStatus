@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from anystatus.checks.docker_api import DockerClient, image_details, image_list
+from anystatus.checks.docker_api import DockerClient, RunningImage, image_details, image_list
 from anystatus.checks.registry import ImageRef, RegistryClient, parse_image
 from anystatus.table import Table
 
@@ -105,6 +105,19 @@ def safe_parse(entry: str) -> ImageRef | None:
         return parse_image(entry)
     except ValueError:
         return None
+
+
+def is_ignored(ignore: set[str], running: RunningImage, ref: ImageRef | None) -> bool:
+    """Whether an `ignore` entry (lower case) names this image: as the container was created with, or by repository,
+    short name, or either with the tag (`postgres`, `library/postgres`, `postgres:16`)."""
+    names = {running.reference.lower()}
+    if ref is not None:
+        names |= {ref.repository, ref.short_name}
+        if ref.repository.startswith("library/"):
+            names.add(ref.repository[len("library/") :])
+        if ref.tag:
+            names |= {f"{ref.repository}:{ref.tag}", f"{ref.short_name}:{ref.tag}"}
+    return bool(names & ignore)
 
 
 class ImageStore:

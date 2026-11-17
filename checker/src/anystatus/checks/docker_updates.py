@@ -34,9 +34,8 @@ from anystatus.checks.docker_api import (
     image_info,
     running_images,
 )
-from anystatus.checks.images import ImageStore, rebuilt, registry_credentials
+from anystatus.checks.images import ImageStore, is_ignored, rebuilt, registry_credentials
 from anystatus.checks.registry import (
-    ImageRef,
     RegistryClient,
     RegistryError,
     parse_image,
@@ -124,16 +123,6 @@ class DockerUpdates(Check):
         ignore = table.str_list("ignore") or []
         return cls(endpoint, versions, ignore, registry_credentials(table))
 
-    def _ignored(self, running: RunningImage, ref: ImageRef | None) -> bool:
-        names = {running.reference.lower()}
-        if ref is not None:
-            names |= {ref.repository, ref.short_name}
-            if ref.repository.startswith("library/"):
-                names.add(ref.repository[len("library/") :])
-            if ref.tag:
-                names |= {f"{ref.repository}:{ref.tag}", f"{ref.short_name}:{ref.tag}"}
-        return bool(names & self.ignore)
-
     def run(self, timeout: float) -> Reading:
         deadline = time.monotonic() + timeout
 
@@ -193,7 +182,7 @@ class DockerUpdates(Check):
         label = ref.short_name if ref else image.image_id[7:19]
         if ref is not None and ref.digest is not None:
             return _Verdict(label, "skipped", "pinned")
-        if ref is None or self._ignored(image, ref):
+        if ref is None or is_ignored(self.ignore, image, ref):
             return _Verdict(label, "skipped", "ignored" if ref is not None else "untagged")
         try:
             local = store.inspect(image.image_id)

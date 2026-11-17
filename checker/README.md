@@ -321,6 +321,10 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   applies (inherited lines marked "as MEDIUM: …"). Trivy's report doesn't say whether a CVE is
   known to be exploited (CISA's KEV list), so neither does the checker.
 
+  `ignore = ["postgres"]` leaves images out, matched as in `docker_updates`: they are not scanned, not asked about at
+  a registry, not counted, and the `/vulns` page names them. Two `image_vulns` checks on one host, each ignoring
+  the other's images, give a strict and a loose schedule; a new container shows in both until listed.
+
   `trivy = "trivy"` is the command, a path, or a list such as `["docker", "run", "--rm", ...]`; **if it can't be
   found the config is invalid** (and a Trivy that vanishes later makes the check `unknown`). `cache_dir` is Trivy's
   `--cache-dir`: keep it on a volume so the database isn't downloaded every day. **`timeout = "15m"`** (the first
@@ -364,6 +368,7 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   trivy = "/usr/local/bin/trivy"
   cache_dir = "/var/cache/trivy"
   env = ["HOME"]
+  ignore = ["postgres"]             # as in docker_updates
   show_after = { unknown = "3d" }   # a Trivy or registry hiccup for a day or two doesn't turn the card grey
   registry_auth_env = { "ghcr.io" = "GHCR_AUTH" }
 

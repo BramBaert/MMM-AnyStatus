@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -45,7 +46,7 @@ from anystatus.checks.docker_api import (
     running_images,
 )
 from anystatus.checks.exec_cmd import run_process
-from anystatus.checks.images import ImageStore, LocalImage, display_name, rebuilt, registry_credentials, safe_parse
+from anystatus.checks.images import ImageStore, LocalImage, display_name, is_ignored, rebuilt, registry_credentials, safe_parse
 from anystatus.checks.registry import ImageRef, RegistryClient, RegistryError
 from anystatus.errors import mask
 from anystatus.judge import lasted
@@ -75,6 +76,10 @@ DEFAULT_SCHEDULE: dict[str, dict[str, tuple[float, float]]] = {
     klass: {"CRITICAL": (_AT_ONCE, _AT_ONCE), "HIGH": (_AT_ONCE, _NEVER)} for klass in ("update", "rebuild", "waiting")
 }
 MAX_OUTPUT = 32 * 1024 * 1024  # bytes of Trivy's JSON kept per image
+# One Trivy at a time in this process, for every image_vulns check: two that both find the database out of date
+# download it into the same cache at once, and one of them crashes (SIGBUS in bbolt; Trivy 0.76.1, 2 of 2 tries).
+# Another process sharing the cache is not covered.
+_TRIVY_LOCK = threading.Lock()
 _LEVEL_RANK = {"ok": 0, "warn": 1, "crit": 2}
 MAX_NAMES = 3  # images named on the card (their entries are long); the rest is counted, every one is on /vulns
 
@@ -207,6 +212,7 @@ class ImageVulns(Check):
         cache_dir: str | None,
         schedule: dict[str, dict[str, Times]],
         env_names: list[str],
+        ignore: list[str],
         credentials: dict[str, str],
     ) -> None:
         self.client = DockerClient(endpoint)
@@ -217,6 +223,7 @@ class ImageVulns(Check):
         self.listed = schedule  # as written in the config
         self.schedule = {klass: apply_ladder(schedule.get(klass, {})) for klass in CLASSES}  # as it applies
         self.env_names = env_names
+        self.ignore = {i.lower() for i in ignore}
         self.credentials = credentials
         self.now: Callable[[], datetime] = _now
         self.memory: CheckMemory | None = None
@@ -246,11 +253,12 @@ class ImageVulns(Check):
         cache_dir = table.opt_str("cache_dir")
         schedule = read_schedule(table)
         env_names = table.str_list("env") or []
+        ignore = table.str_list("ignore") or []
         if "DOCKER_HOST" in env_names:
             table.error("'env': DOCKER_HOST comes from the check's 'docker' key: remove it from 'env'")
         if not table.has("timeout"):
             table.warning('image_vulns: the default timeout of 10 s is too short for Trivy: set timeout = "15m"')
-        return cls(endpoint, trivy, cache_dir, schedule, env_names, registry_credentials(table))
+        return cls(endpoint, trivy, cache_dir, schedule, env_names, ignore, registry_credentials(table))
 
     # memory
 
@@ -306,12 +314,16 @@ class ImageVulns(Check):
         run = _Run(ImageStore(self.client, left), RegistryClient(self.credentials, deadline), left)
         scanned: list[tuple[str, list[Vuln], dict[tuple[str, str], str]]] = []  # (reference, vulns, class per key)
         failed: list[str] = []
+        ignored = 0
         timed_out = False
         first_failure = "trivy failed"
         for index, image in enumerate(images):
             target = image.reference or image.image_id[:19]
             try:
                 target = self._target(image, left())
+                if is_ignored(self.ignore, image, safe_parse(target)):
+                    ignored += 1
+                    continue
                 vulns = self._scan(target, left())
                 scanned.append((target, vulns, self._classify(image, target, vulns, run)))
             except CheckFailure as exc:
@@ -319,8 +331,14 @@ class ImageVulns(Check):
                 first_failure = exc.summary
                 if exc.summary.startswith("timed out"):
                     timed_out = True
-                    failed.extend(i.reference or i.image_id[:19] for i in images[index + 1 :])
+                    failed.extend(
+                        i.reference or i.image_id[:19] for i in images[index + 1 :] if not is_ignored(self.ignore, i, safe_parse(i.reference))
+                    )
                     break
+        if not scanned and ignored == len(images):
+            self.report = Report(now)
+            self._remember({})
+            return self._card([], 0, [])
         if not scanned:
             raise CheckFailure(first_failure if timed_out or len(images) == 1 else f"trivy failed: {first_failure}")
 
@@ -449,7 +467,16 @@ class ImageVulns(Check):
         command.append(image)
         env = self._environment()
         secrets = [v for v in env.values() if v]
-        done = run_process(command, {**env, "DOCKER_HOST": self.docker_host}, timeout, MAX_OUTPUT, secrets)
+        started = time.monotonic()
+        if not _TRIVY_LOCK.acquire(timeout=max(timeout, 0)):
+            raise CheckFailure("timed out waiting for another check's Trivy scan")
+        try:
+            left = timeout - (time.monotonic() - started)
+            if left <= 0:
+                raise CheckFailure("timed out waiting for another check's Trivy scan")
+            done = run_process(command, {**env, "DOCKER_HOST": self.docker_host}, left, MAX_OUTPUT, secrets)
+        finally:
+            _TRIVY_LOCK.release()
         if done.stderr:
             log.debug("image_vulns: trivy stderr: %s", done.stderr)
         if done.code != 0:
@@ -580,6 +607,8 @@ def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
         report = check.report
         parts.append(f"<h2>{e(spec.label)} <small>({e(spec.id)})</small></h2>")
         parts.append(_schedule_table(check))
+        if check.ignore:
+            parts.append(f"<p>Ignores: {e(', '.join(sorted(check.ignore)))}.</p>")
         if report is None:
             parts.append("<p>No run yet.</p>")
             continue

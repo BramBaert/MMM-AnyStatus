@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import textwrap
+import threading
 import time
 import urllib.request
 from collections.abc import Iterator
@@ -15,6 +16,8 @@ import pytest
 from fakes import FakeDocker, FakeRegistry, digest, fixture, trivy_calls, trivy_json, write_fake_trivy
 from helpers import START, FakeClock, parse
 
+from anystatus.checks import image_vulns
+from anystatus.checks.exec_cmd import ProcessResult
 from anystatus.checks.image_vulns import Applied, ImageVulns, apply_ladder, parse_trivy, render_vulns_page
 from anystatus.cli import pages
 from anystatus.document import Snapshot
@@ -407,6 +410,117 @@ def test_nothing_due(tmp_path: Path, docker: FakeDocker) -> None:
     command = write_fake_trivy(tmp_path, {}, default=trivy_json([("CVE-2024-1", "CRITICAL", None)]))
     _, core = run(build(tmp_path, docker, command))
     assert (core.level, core.value, core.summary) == ("ok", 0, "nothing due in 2 images")
+
+
+# --- one Trivy at a time
+
+
+def test_two_checks_never_run_trivy_at_the_same_time(tmp_path: Path, docker: FakeDocker, monkeypatch: pytest.MonkeyPatch) -> None:
+    running, most = 0, 0
+    guard = threading.Lock()
+
+    def slow_trivy(*args: Any, **kwargs: Any) -> ProcessResult:
+        nonlocal running, most
+        with guard:
+            running += 1
+            most = max(most, running)
+        time.sleep(0.2)
+        with guard:
+            running -= 1
+        return ProcessResult(0, json.dumps(trivy_json([])), "", False)
+
+    monkeypatch.setattr(image_vulns, "run_process", slow_trivy)
+    containers(docker, "a:1", "b:1")
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    specs = [build(tmp_path / name, docker, [sys.executable]) for name in ("one", "two")]
+    outcomes: list[Any] = []
+    threads = [threading.Thread(target=lambda s=spec: outcomes.append(execute(s))) for spec in specs]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert most == 1
+    assert [type(o).__name__ for o in outcomes] == ["Observation", "Observation"], outcomes
+
+
+def test_waiting_for_another_scan_counts_against_the_timeout(tmp_path: Path, docker: FakeDocker) -> None:
+    containers(docker, "a:1")
+    spec = build(tmp_path, docker, [sys.executable], timeout="1s")
+    with image_vulns._TRIVY_LOCK:
+        outcome = execute(spec)
+    assert isinstance(outcome, Failure) and outcome.summary.startswith("timed out waiting for another check's Trivy scan")
+
+
+# --- ignore
+
+
+def scanned_images(tmp_path: Path) -> list[str]:
+    return [call[-1] for call in trivy_calls(tmp_path)]
+
+
+@pytest.mark.parametrize(
+    ("ignore", "left"),
+    [
+        ('["postgres"]', ["ghcr.io/acme/web:1", "redis:7"]),  # short name (and library/ is implied)
+        ('["acme/web"]', ["postgres:16", "redis:7"]),  # repository
+        ('["Postgres:16", "ghcr.io/acme/web:1"]', ["redis:7"]),  # name:tag, case-insensitive, as created
+        ('["postgres:15"]', ["postgres:16", "ghcr.io/acme/web:1", "redis:7"]),  # another tag: not ignored
+    ],
+)
+def test_ignore_matches_as_docker_updates_does(tmp_path: Path, docker: FakeDocker, ignore: str, left: list[str]) -> None:
+    containers(docker, "postgres:16", "ghcr.io/acme/web:1", "redis:7")
+    command = write_fake_trivy(tmp_path, {}, default=trivy_json([("CVE-2024-1", "CRITICAL", "2")]))
+    spec = build(tmp_path, docker, command, f"ignore = {ignore}")
+    run(spec)
+    assert sorted(scanned_images(tmp_path)) == sorted(left)
+    assert {f.reference for f in spec.check.report.findings} == set(left)
+
+
+def test_an_ignored_image_is_not_counted_not_asked_about_and_loses_its_dates(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    db = pulled(docker, reg, "acme/db", "11", "db-1")
+    reg.add("acme/db", "11", manifest=digest("db-2"))  # a newer build: it would be asked about and scanned remotely
+    containers(docker, "redis:7")
+    outputs = {db: trivy_json([("CVE-2024-1", "CRITICAL", "2")]), "redis:7": trivy_json([("CVE-2024-2", "LOW", "2")])}
+    command = write_fake_trivy(tmp_path, outputs)
+    spec = build(tmp_path, docker, command, SCHEDULE)
+    spec.check.start(StoreMemory("v", None, FakeClock(), None))
+    run(spec)
+    assert f"{db}|CVE-2024-1" in spec.check.found
+    requests, calls = len(reg.requests), len(trivy_calls(tmp_path))
+    assert requests > 0 and calls > 1
+
+    ignoring = build(tmp_path, docker, command, 'ignore = ["acme/db"]\n' + SCHEDULE)
+    ignoring.check.start(StoreMemory("v", None, FakeClock(), None))
+    ignoring.check.found = dict(spec.check.found)
+    _, core = run(at(ignoring, START + DAY))
+    assert scanned_images(tmp_path)[calls:] == ["redis:7"]  # no scan of the image, none of its newer build
+    assert len(reg.requests) == requests
+    assert (core.level, core.value, core.summary) == ("ok", 0, "nothing due in 1 image")
+    assert not any(key.startswith(f"{db}|") for key in ignoring.check.found)  # as for an image no longer running
+    assert {f.image for f in ignoring.check.report.findings} == {"redis"}
+
+
+def test_ignoring_every_image_is_nothing_due_not_a_failure(tmp_path: Path, docker: FakeDocker) -> None:
+    containers(docker, "a:1", "b:1")
+    command = write_fake_trivy(tmp_path, {}, default=trivy_json([("CVE-2024-1", "CRITICAL", "2")]))
+    outcome, core = run(build(tmp_path, docker, command, 'ignore = ["a", "b"]'))
+    assert isinstance(outcome, Observation)
+    assert (core.level, core.value, core.summary) == ("ok", 0, "nothing due in 0 images")
+    assert scanned_images(tmp_path) == []
+
+
+def test_ignore_must_be_a_list_of_strings(tmp_path: Path, docker: FakeDocker) -> None:
+    for bad in ('ignore = "nginx"', "ignore = [1]"):
+        with pytest.raises(ConfigError, match="'ignore' must be a list"):
+            build(tmp_path, docker, [sys.executable, "-c", "pass"], bad)
+
+
+def test_the_page_says_what_a_check_ignores(tmp_path: Path, docker: FakeDocker) -> None:
+    command = [sys.executable, "-c", "pass"]
+    assert "Ignores" not in render_vulns_page("home", [build(tmp_path, docker, command)]).decode("utf-8")
+    page = render_vulns_page("home", [build(tmp_path, docker, command, 'ignore = ["web", "Postgres:16"]')]).decode("utf-8")
+    assert "<p>Ignores: postgres:16, web.</p>" in page
 
 
 # --- the page

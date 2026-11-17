@@ -554,6 +554,7 @@ group = "docker"
 interval = "1d"
 timeout = "15m"             # the first run downloads Trivy's database
 trivy = "trivy"             # the command, or a path
+ignore = ["postgres"]       # images to leave out (as in docker_updates)
 
 [check.schedule.update]     # per class and severity: when a CVE turns the card amber and red (the README explains each line)
 CRITICAL = { warn = "0d", crit = "3d" }
@@ -563,6 +564,13 @@ CRITICAL = { warn = "never", crit = "0d" }
 
 Runs `trivy image --format json --quiet --scanners vuln <image>` **once for each image of the running containers**,
 without `--ignore-unfixed`: every vulnerability is seen, and what the user can do about it decides what it means.
+
+**`ignore`** leaves images out, matched exactly as in [`docker_updates`](#docker_updates): an ignored image is never
+scanned, never asked about at a registry, not counted in "nothing due in N images" and not on the card or `/vulns`,
+and its first-found dates are forgotten like those of an image that is no longer running. `/vulns` says per check
+what it ignores. Two checks on one Docker host can split the images between them: a strict one that ignores the
+internal images, and a looser one that ignores the internet-facing ones; a new container shows in both until it is put
+on one list.
 
 **Classes**, per vulnerability (CVE and package) in an image:
 
@@ -617,6 +625,10 @@ existed.
   #10840). Nothing is built on it.
 - Trivy not being installed is a config error at startup. Its cache (`--cache-dir`) should be on a volume, so the
   database isn't downloaded every day.
+- **One Trivy at a time** in a checker, over all its `image_vulns` checks: two scans that both find the database out
+  of date download it into the same cache at once, and one of them crashes (SIGBUS; Trivy 0.76.1, tested
+  2026-11-17). A check waits for the other's scan, and the wait counts against its `timeout`: give each check room for
+  the others' scans. Another process using the same cache dir is not covered.
 
 ### `python`
 
