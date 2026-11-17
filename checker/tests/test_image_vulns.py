@@ -754,3 +754,134 @@ def test_the_default_timeout_is_warned_about(tmp_path: Path) -> None:
     config = parse(text, tmp_path)
     assert any("too short for Trivy" in w for w in config.warnings)
     assert os.path.exists(sys.executable)
+
+
+# --- accept: seen and accepted, with an end date
+
+CVE = "CVE-2025-68121"
+ACCEPT_SCHEDULE = '[check.schedule.rebuild]\nCRITICAL = { warn = "0d", crit = "3d" }\n'
+UNTIL = (START + 2 * DAY).date().isoformat()
+
+
+def accepting(
+    tmp_path: Path, docker: FakeDocker, entry: str = "", images: tuple[str, ...] = ("postgres:18-alpine",), cves: tuple[str, ...] = (CVE,)
+) -> Any:
+    containers(docker, *images)
+    command = write_fake_trivy(tmp_path, {}, default=trivy_json([(cve, "CRITICAL", "2") for cve in cves]))
+    entry = entry or f'{{ cve = "{CVE}", image = "postgres", until = {UNTIL}, why = "not reachable" }}'
+    return build(tmp_path, docker, command, f"accept = [{entry}]\n{ACCEPT_SCHEDULE}")
+
+
+def test_an_accepted_critical_does_not_count_until_its_end_date_then_counts_with_its_age(tmp_path: Path, docker: FakeDocker) -> None:
+    spec = accepting(tmp_path, docker)
+    spec.check.start(StoreMemory("v", None, FakeClock(), None))
+    _, core = run(at(spec, START))
+    assert (core.level, core.value, core.summary) == ("ok", 0, "nothing due in 1 image")
+    assert spec.check.report.findings[0].accepted is not None
+    assert run(at(spec, START + 2 * DAY + timedelta(hours=11)))[1].level == "ok"  # the whole last day (23:00 UTC)
+    _, core = run(at(spec, START + 3 * DAY))
+    assert (core.level, core.value) == ("crit", 1)  # found at START: 3 days old, the dates kept running
+    assert rows(spec) == [("postgres", CVE, "rebuild", "crit")]
+    assert spec.check.report.findings[0].accepted is None
+
+
+@pytest.mark.parametrize(
+    ("image", "images"),
+    [
+        ("postgres", ("postgres:18-alpine",)),  # short name
+        ("library/postgres", ("postgres:18-alpine",)),  # repository
+        ("Postgres:18-Alpine", ("postgres:18-alpine",)),  # name:tag, case-insensitive
+        ("acme/web", ("ghcr.io/acme/web:1",)),
+    ],
+)
+def test_accept_matches_the_image_as_ignore_does(tmp_path: Path, docker: FakeDocker, image: str, images: tuple[str, ...]) -> None:
+    entry = f'{{ cve = "{CVE.lower()}", image = "{image}", until = {UNTIL}, why = "w" }}'  # the CVE is case-insensitive too
+    _, core = run(accepting(tmp_path, docker, entry, images))
+    assert (core.level, core.value) == ("ok", 0)
+
+
+def test_accept_covers_every_package_of_the_cve(tmp_path: Path, docker: FakeDocker) -> None:
+    containers(docker, "postgres:18-alpine")
+    output = trivy_json([(CVE, "CRITICAL", "2"), (CVE, "CRITICAL", "2")])
+    output["Results"][0]["Vulnerabilities"][1]["PkgName"] = "other-package"
+    spec = build(
+        tmp_path,
+        docker,
+        write_fake_trivy(tmp_path, {}, default=output),
+        f'accept = [{{ cve = "{CVE}", image = "postgres", until = {UNTIL}, why = "w" }}]\n{ACCEPT_SCHEDULE}',
+    )
+    _, core = run(spec)
+    assert core.value == 0 and len(spec.check.report.findings) == 2
+    assert all(f.accepted is not None for f in spec.check.report.findings)
+
+
+def test_another_image_or_another_cve_still_counts(tmp_path: Path, docker: FakeDocker) -> None:
+    spec = accepting(tmp_path, docker, images=("postgres:18-alpine", "redis:7"), cves=(CVE, "CVE-2025-1"))
+    _, core = run(spec)
+    assert sorted((f.image, f.vuln.id, f.accepted is not None) for f in spec.check.report.findings) == [
+        ("postgres", "CVE-2025-1", False),
+        ("postgres", CVE, True),
+        ("redis", "CVE-2025-1", False),
+        ("redis", CVE, False),
+    ]
+    assert core.value == 3  # (postgres, CVE-2025-1), (redis, CVE), (redis, CVE-2025-1)
+
+
+@pytest.mark.parametrize(
+    ("accept", "message"),
+    [
+        ('{ cve = "CVE-1", image = "a", until = 2999-01-01 }', "'accept' entry 1: missing key 'why'"),
+        ('{ cve = "CVE-1", image = "a", until = 2999-01-01, why = "w", extra = 1 }', "'accept' entry 1: unknown key 'extra'"),
+        ('{ cve = "CVE-1", image = "a", until = "soon", why = "w" }', "'accept' entry 1: 'until' must be a date"),
+        ('{ cve = "CVE-1", image = "a", until = 2999-01-01T10:00:00Z, why = "w" }', "'until' must be a date"),
+        ('{ cve = "CVE-1", image = "a", until = 20, why = "w" }', "'until' must be a date"),
+        ('{ cve = "CVE-1", image = "a", until = 2999-01-01, why = " " }', "'why' must be a non-empty string"),
+    ],
+)
+def test_accept_config_errors(tmp_path: Path, docker: FakeDocker, accept: str, message: str) -> None:
+    good = '{ cve = "CVE-9", image = "b", until = 2999-01-01, why = "w" }'
+    with pytest.raises(ConfigError) as err:
+        build(tmp_path, docker, [sys.executable, "-c", "pass"], f"accept = [{good}, {accept}]")
+    assert message.replace("entry 1", "entry 2") in "; ".join(err.value.problems)
+
+
+def test_accept_must_be_a_list_of_tables(tmp_path: Path, docker: FakeDocker) -> None:
+    for bad in ('accept = "CVE-1"', "accept = [1]", 'accept = { cve = "CVE-1" }'):
+        with pytest.raises(ConfigError, match="'accept' must be a list of tables"):
+            build(tmp_path, docker, [sys.executable, "-c", "pass"], bad)
+
+
+def test_accept_takes_a_date_or_a_string(tmp_path: Path, docker: FakeDocker) -> None:
+    for until in ("2999-01-01", '"2999-01-01"'):
+        spec = build(tmp_path, docker, [sys.executable, "-c", "pass"], f'accept = [{{ cve = "CVE-1", image = "a", until = {until}, why = "w" }}]')
+        assert [a.until.isoformat() for a in spec.check.accept] == ["2999-01-01"]
+
+
+def test_an_end_date_that_has_passed_is_warned_about(tmp_path: Path) -> None:
+    text = (
+        f'[[check]]\nid = "v"\ntype = "image_vulns"\ndocker = "tcp://localhost:2375"\ntimeout = "15m"\ntrivy = {json.dumps([sys.executable])}\n'
+        'accept = [{ cve = "CVE-2020-1", image = "postgres", until = 2020-01-31, why = "w" }]\n'
+    )
+    config = parse(text, tmp_path)
+    assert any("accept entry 1 (CVE-2020-1, postgres): until 2020-01-31 has passed: remove it" in w for w in config.warnings)
+
+
+def test_the_page_shows_accepted_rows_and_the_accept_list(tmp_path: Path, docker: FakeDocker) -> None:
+    entries = (
+        f'{{ cve = "{CVE}", image = "postgres", until = {UNTIL}, why = "<b>not</b> reachable" }}, '
+        '{ cve = "CVE-2025-2", image = "postgres", until = 2999-01-01, why = "never seen" }'
+    )
+    spec = accepting(tmp_path, docker, entries)
+    assert "Accepted (not counted" in render_vulns_page("home", [spec]).decode("utf-8")  # before the first run: no marks yet
+    run(at(spec, START))
+    page = render_vulns_page("home", [spec]).decode("utf-8")
+    assert f"accepted until {UNTIL}: &lt;b&gt;not&lt;/b&gt; reachable" in page and "<b>not</b>" not in page
+    never_seen = next(row for row in page.split("<tr>") if "CVE-2025-2</td>" in row and "never seen" in row)
+    assert "not found in the last scan" in never_seen
+    first = next(row for row in page.split("<tr>") if row.startswith(f"<td>{CVE}</td>"))
+    assert "not found" not in first and "expired" not in first
+    run(at(spec, START + 3 * DAY))
+    page = render_vulns_page("home", [spec]).decode("utf-8")
+    first = next(row for row in page.split("<tr>") if row.startswith(f"<td>{CVE}</td>"))
+    assert "expired: counts again" in first
+    assert "accepted until" not in page.split("<th>First found</th>")[1]  # the finding counts again: normal level

@@ -555,6 +555,9 @@ interval = "1d"
 timeout = "15m"             # the first run downloads Trivy's database
 trivy = "trivy"             # the command, or a path
 ignore = ["postgres"]       # images to leave out (as in docker_updates)
+accept = [                  # seen and accepted, until an end date
+    { cve = "CVE-2025-68121", image = "postgres", until = 2027-02-17, why = "Go's crypto/tls inside gosu, which has no TLS code and only runs at container start" },
+]
 
 [check.schedule.update]     # per class and severity: when a CVE turns the card amber and red (the README explains each line)
 CRITICAL = { warn = "0d", crit = "3d" }
@@ -571,6 +574,15 @@ and its first-found dates are forgotten like those of an image that is no longer
 what it ignores. Two checks on one Docker host can split the images between them: a strict one that ignores the
 internal images, and a looser one that ignores the internet-facing ones; a new container shows in both until it is put
 on one list.
+
+**`accept`** holds a CVE back for one image until an end date, with the reason written down: each entry needs `cve`,
+`image`, `until` and `why` (a missing or unknown key, an empty `why` or an `until` that isn't a date, written
+`2027-02-17` or as the string `"2027-02-17"`, is a config error). `image` is matched as `ignore` matches; `cve`
+case-insensitively, for every package of the image. The CVE is still scanned, classified and dated, but doesn't count
+(not in the card's level, value or summary) through the whole day `until` (UTC); from the next day it counts again,
+with its real age, because first-found dates keep running meanwhile. An `until` that has already passed is a config
+warning. `/vulns` shows an accepted row as "accepted until ..." with its reason, and lists the entries under the
+schedule, marking those that matched nothing in the last scan and those that expired.
 
 **Classes**, per vulnerability (CVE and package) in an image:
 

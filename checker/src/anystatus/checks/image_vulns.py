@@ -20,10 +20,14 @@ it was first found (kept in the memory file). A severity a class doesn't list ta
 severity below it (LOW < MEDIUM < HIGH < CRITICAL); below the lowest listed one it doesn't count. UNKNOWN (not rated)
 is outside that ladder: it counts only when listed itself, and passes nothing on. The card's level is the worst over
 all CVEs; the full list, and the schedule as it applies, go on the checker's page `/vulns`.
+
+A CVE in an image can be **accepted** (`accept`) through an end date: it is still scanned, classified and dated, but it
+doesn't count, and /vulns shows why. The decision is made where a finding's level is: in `_run`.
 """
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import logging
@@ -33,7 +37,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
 from anystatus.checks.base import Check, CheckMemory, register
@@ -166,6 +170,16 @@ def parse_trivy(text: str) -> list[Vuln]:
 
 
 @dataclass(frozen=True)
+class Accept:
+    """One `accept` entry: this CVE, in this image, is seen and not counted through the day `until` (UTC)."""
+
+    cve: str
+    image: str
+    until: date
+    why: str
+
+
+@dataclass(frozen=True)
 class Finding:
     """One vulnerability in one image, classified and judged: a row of the /vulns page."""
 
@@ -176,6 +190,7 @@ class Finding:
     first_found: datetime
     level: str  # "ok" (not due yet, or not in the schedule), "warn", "crit"
     scheduled: bool  # the schedule counts this class and severity (its own line or an inherited one, not never/never)
+    accepted: Accept | None = None  # the entry that holds it back for now (its level is then "ok")
 
 
 @dataclass(frozen=True)
@@ -184,6 +199,7 @@ class Report:
     findings: tuple[Finding, ...] = ()
     notes: tuple[str, ...] = ()
     error: str = ""  # the run failed: why
+    matched: frozenset[int] = frozenset()  # the `accept` entries (by position) that matched a finding, expired or not
 
 
 class _Unchecked(Exception):
@@ -213,6 +229,7 @@ class ImageVulns(Check):
         schedule: dict[str, dict[str, Times]],
         env_names: list[str],
         ignore: list[str],
+        accept: list[Accept],
         credentials: dict[str, str],
     ) -> None:
         self.client = DockerClient(endpoint)
@@ -224,6 +241,7 @@ class ImageVulns(Check):
         self.schedule = {klass: apply_ladder(schedule.get(klass, {})) for klass in CLASSES}  # as it applies
         self.env_names = env_names
         self.ignore = {i.lower() for i in ignore}
+        self.accept = accept
         self.credentials = credentials
         self.now: Callable[[], datetime] = _now
         self.memory: CheckMemory | None = None
@@ -254,11 +272,12 @@ class ImageVulns(Check):
         schedule = read_schedule(table)
         env_names = table.str_list("env") or []
         ignore = table.str_list("ignore") or []
+        accept = read_accept(table)
         if "DOCKER_HOST" in env_names:
             table.error("'env': DOCKER_HOST comes from the check's 'docker' key: remove it from 'env'")
         if not table.has("timeout"):
             table.warning('image_vulns: the default timeout of 10 s is too short for Trivy: set timeout = "15m"')
-        return cls(endpoint, trivy, cache_dir, schedule, env_names, ignore, registry_credentials(table))
+        return cls(endpoint, trivy, cache_dir, schedule, env_names, ignore, accept, registry_credentials(table))
 
     # memory
 
@@ -312,7 +331,7 @@ class ImageVulns(Check):
             self._remember({})
             return Observation(level="ok", summary="no running containers", value=0)
         run = _Run(ImageStore(self.client, left), RegistryClient(self.credentials, deadline), left)
-        scanned: list[tuple[str, list[Vuln], dict[tuple[str, str], str]]] = []  # (reference, vulns, class per key)
+        scanned: list[tuple[RunningImage, str, list[Vuln], dict[tuple[str, str], str]]] = []  # (container's image, reference, vulns, class per key)
         failed: list[str] = []
         ignored = 0
         timed_out = False
@@ -325,7 +344,7 @@ class ImageVulns(Check):
                     ignored += 1
                     continue
                 vulns = self._scan(target, left())
-                scanned.append((target, vulns, self._classify(image, target, vulns, run)))
+                scanned.append((image, target, vulns, self._classify(image, target, vulns, run)))
             except CheckFailure as exc:
                 failed.append(target)  # what was scanned (and its dates are kept under), as far as it got
                 first_failure = exc.summary
@@ -345,7 +364,7 @@ class ImageVulns(Check):
         # First found, per CVE and image. A CVE that is gone from a scanned image is forgotten (if it comes back, it
         # is new); the dates of an image that couldn't be scanned this time are kept.
         found: dict[str, datetime] = {}
-        for reference, vulns, _ in scanned:
+        for _, reference, vulns, _ in scanned:
             for vuln in vulns:
                 key = f"{reference}|{vuln.id}"
                 found[key] = self.found.get(key, now)
@@ -355,7 +374,9 @@ class ImageVulns(Check):
         self._remember(found)
 
         findings: list[Finding] = []
-        for reference, vulns, classes in scanned:
+        matched: set[int] = set()
+        for image, reference, vulns, classes in scanned:
+            ref = safe_parse(reference)
             for vuln in vulns:
                 klass = classes[vuln.key]
                 first = found[f"{reference}|{vuln.id}"]
@@ -364,15 +385,22 @@ class ImageVulns(Check):
                 if line is not None:
                     warn, crit = line.times
                     level = "crit" if lasted(first, crit, now) else "warn" if lasted(first, warn, now) else "ok"
+                # The one place a finding's level is decided: an accepted one stays "ok" through its end date. The
+                # first-found date above keeps running meanwhile, so it comes back with its real age.
+                hits = [i for i, a in enumerate(self.accept) if a.cve.lower() == vuln.id.lower() and is_ignored({a.image.lower()}, image, ref)]
+                matched.update(hits)
+                accepted = next((self.accept[i] for i in hits if self.accept[i].until >= now.date()), None)
+                if accepted is not None:
+                    level = "ok"
                 counts = line is not None and line.counts
-                findings.append(Finding(_short(reference), reference, vuln, klass, first, level, counts))
+                findings.append(Finding(_short(reference), reference, vuln, klass, first, level, counts, accepted))
 
         notes: list[str] = []
         if run.unchecked:
             notes.append(f"newer build not checked: {', '.join(sorted(set(run.unchecked)))}")
         if failed:
             notes.append(f"{len(failed)} not scanned ({'timed out' if timed_out else 'trivy failed'})")
-        self.report = Report(now, tuple(sorted(findings, key=_row_order)), tuple(notes))
+        self.report = Report(now, tuple(sorted(findings, key=_row_order)), tuple(notes), matched=frozenset(matched))
         return self._card(findings, len(scanned), notes)
 
     def _card(self, findings: list[Finding], images: int, notes: list[str]) -> Observation:
@@ -524,6 +552,41 @@ def read_schedule(table: Table) -> dict[str, dict[str, tuple[float, float]]]:
     return schedule
 
 
+def read_accept(table: Table) -> list[Accept]:
+    """`accept = [{ cve, image, until, why }, ...]`: every key of every entry is required. Entries are numbered from 1
+    in messages. An `until` that has already passed is a warning, not an error: it is only a reminder to clean up."""
+    raw = table.raw("accept")
+    if raw is None:
+        return []
+    keys = {"cve", "image", "until", "why"}
+    if not isinstance(raw, list) or not all(isinstance(entry, dict) for entry in raw):
+        table.error('\'accept\' must be a list of tables, such as [{ cve = "CVE-2025-1", image = "postgres", until = 2027-02-17, why = "..." }]')
+        return []
+    accept: list[Accept] = []
+    for number, entry in enumerate(raw, 1):
+        where = f"'accept' entry {number}"
+        problems = [f"missing key '{key}'" for key in sorted(keys - set(entry))] + [f"unknown key '{key}'" for key in sorted(set(entry) - keys)]
+        if problems:
+            table.error(f"{where}: {', '.join(problems)}")
+            continue
+        until = entry["until"]
+        if isinstance(until, str) and len(until) == 10:
+            with contextlib.suppress(ValueError):
+                until = date.fromisoformat(until)
+        if isinstance(until, datetime) or not isinstance(until, date):
+            table.error(f"{where}: 'until' must be a date, such as 2027-02-17 or \"2027-02-17\"")
+            continue
+        texts = {key: entry[key] for key in ("cve", "image", "why")}
+        empty = [key for key, text in texts.items() if not isinstance(text, str) or not text.strip()]
+        if empty:
+            table.error(f"{where}: {', '.join(f'{key!r}' for key in empty)} must be a non-empty string")
+            continue
+        accept.append(Accept(texts["cve"].strip(), texts["image"].strip(), until, texts["why"].strip()))
+        if until < _now().date():
+            table.warning(f"accept entry {number} ({texts['cve']}, {texts['image']}): until {until.isoformat()} has passed: remove it")
+    return accept
+
+
 def _short(reference: str) -> str:
     """The image name for a summary: the last path part without the tag (`ghcr.io/org/app:1.2` -> `app`)."""
     name = reference.split("@", 1)[0].rsplit("/", 1)[-1]
@@ -555,6 +618,7 @@ th, td { text-align: left; padding: 4px 10px 4px 0; border-bottom: 1px solid var
 th { color: var(--muted); font-weight: 600; }
 td.crit { color: var(--crit); font-weight: 600; } td.warn { color: var(--warn); font-weight: 600; }
 td.ok { color: var(--muted); }
+td.accepted { color: var(--muted); white-space: normal; min-width: 16em; }
 a { color: inherit; }
 """
 
@@ -590,6 +654,26 @@ def _schedule_table(check: ImageVulns) -> str:
     return "".join(rows)
 
 
+def _accept_table(check: ImageVulns, report: Report | None) -> str:
+    """The `accept` entries, with the ones that matched nothing in the last run and the ones that ran out marked."""
+    e = html.escape
+    today = (report.ts if report is not None else check.now()).date()
+    rows = []
+    for index, a in enumerate(check.accept):
+        marks = []
+        if a.until < today:
+            marks.append("expired: counts again")
+        if report is not None and not report.error and index not in report.matched:
+            marks.append("not found in the last scan")
+        rows.append(
+            f"<tr><td>{e(a.cve)}</td><td>{e(a.image)}</td><td>{e(a.until.isoformat())}</td><td>{e(a.why)}</td><td>{e('; '.join(marks))}</td></tr>"
+        )
+    return (
+        "<p>Accepted (not counted through the end date):</p><div class=scroll><table>"
+        "<tr><th>CVE</th><th>Image</th><th>Until</th><th>Why</th><th></th></tr>" + "".join(rows) + "</table></div>"
+    )
+
+
 def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
     """The full list per image_vulns check: image, CVE, package, installed and fixed version, class, first found."""
     e = html.escape
@@ -609,6 +693,8 @@ def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
         parts.append(_schedule_table(check))
         if check.ignore:
             parts.append(f"<p>Ignores: {e(', '.join(sorted(check.ignore)))}.</p>")
+        if check.accept:
+            parts.append(_accept_table(check, report))
         if report is None:
             parts.append("<p>No run yet.</p>")
             continue
@@ -631,9 +717,12 @@ def render_vulns_page(source: str, specs: Sequence[CheckSpec]) -> bytes:
             klass = CLASS_NAMES[f.klass]
             if f.klass == "no_fix" and v.status and v.status != "affected":
                 klass += f" ({v.status.replace('_', ' ')})"
-            level = f.level if f.scheduled else _DASH
+            if f.accepted is not None:
+                level_cell = f"<td class=accepted>accepted until {e(f.accepted.until.isoformat())}: {e(f.accepted.why)}</td>"
+            else:
+                level_cell = f"<td class={f.level}>{e(f.level if f.scheduled else _DASH)}</td>"
             parts.append(
-                f"<tr><td class={f.level}>{e(level)}</td><td>{e(v.severity.lower())}</td><td>{e(f.reference)}</td>"
+                f"<tr>{level_cell}<td>{e(v.severity.lower())}</td><td>{e(f.reference)}</td>"
                 f"<td>{cve}</td><td>{e(v.package)}</td><td>{e(v.installed)}</td><td>{e(v.fixed or _DASH)}</td>"
                 f"<td>{e(klass)}</td><td>{e(format_time(f.first_found))}</td></tr>"
             )

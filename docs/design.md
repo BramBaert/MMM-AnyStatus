@@ -292,7 +292,5 @@ Not planned yet; how they play out in practice decides their priority.
 - **`1 not scanned (trivy failed)`** on the second host's `image_vulns` (2026-11-13). **TODO:** which image
   (probably the self-built one above) and Trivy's error (in the debug log).
 
-- **Seen and accepted, with an end date** (Bram, 2026-11-12): a list in the config, e.g. `accept = [{ cve = "CVE-…",
-  image = "mariadb", until = "2027-01-31", why = "…" }]`. An accepted CVE doesn't count until its date, then it is
-  back. It keeps the display calm without a blind spot, and the reason is written down. Trivy's `.trivyignore` has
-  the same idea (`exp:` dates).
+- **Seen and accepted, with an end date** (Bram, 2026-11-12): built, as `accept` in `image_vulns`; see
+  [checker.md](checker.md#image_vulns).

@@ -321,6 +321,13 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   applies (inherited lines marked "as MEDIUM: …"). Trivy's report doesn't say whether a CVE is
   known to be exploited (CISA's KEV list), so neither does the checker.
 
+  `accept = [{ cve = "CVE-2025-68121", image = "postgres", until = 2027-02-17, why = "..." }]` sees a CVE and
+  accepts it for one image through the end date (a date, or the string "2027-02-17"; judged in UTC): `image` is
+  matched as `ignore` matches, `cve` case-insensitively. All four keys are required. The CVE is still scanned and
+  keeps its first-found date, but isn't counted; the next day it counts again, with its real age. `/vulns` shows
+  "accepted until ..." and the reason on the row, and lists the entries ("not found in the last scan", "expired:
+  counts again"). An end date in the past is a config warning.
+
   `ignore = ["postgres"]` leaves images out, matched as in `docker_updates`: they are not scanned, not asked about at
   a registry, not counted, and the `/vulns` page names them. Two `image_vulns` checks on one host, each ignoring
   the other's images, give a strict and a loose schedule; a new container shows in both until listed.
