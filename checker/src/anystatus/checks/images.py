@@ -9,7 +9,8 @@ store, but with the containerd image store (the default of new installs) a local
 **The base of an image built here.** Docker records no base name, so the Dockerfile says it:
 `LABEL org.opencontainers.image.base.name=python:3.13-slim`. With a tag, the base is that tag and its layers come
 from the registry (`RegistryClient.layer_ids`, one HEAD per run while the tag is unchanged); with a digest it is
-pinned. The image's first layers are the base's, so a base whose registry layers differ from our first ones was
+pinned, and with a tag next to the digest it was rebuilt when the tag's layers are no longer the pinned ones. The
+image's first layers are the base's, so a base whose registry layers differ from our first ones was
 rebuilt (assuming a rebuilt base kept its number of layers). Without a usable label the base is guessed: the local
 registry image whose `RootFS.Layers` are the longest prefix of ours. That fails when the base is no longer in the
 image store (`docker image prune`), or was never listed (BuildKit doesn't list a base only the build fetched), or
@@ -19,7 +20,7 @@ is an older copy than the build used.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from anystatus.checks.docker_api import DockerClient, RunningImage, image_details, image_list
@@ -120,9 +121,12 @@ class Base:
         return self.built.layers[: len(self._registry_layers(registry))]
 
     def rebuilt(self, registry: RegistryClient) -> bool:
-        """Has the base been rebuilt since `built` was built? A pinned base never is. Raises RegistryError."""
+        """Has the base been rebuilt since `built` was built? A pinned base: has its tag moved away from the pinned
+        digest (never, for a digest without a tag). Raises RegistryError."""
         if self.pinned:
-            return False
+            if self.ref.tag is None:
+                return False
+            return registry.layer_ids(replace(self.ref, digest=None), self.built.platform) != self._registry_layers(registry)
         if self.local is not None:
             return rebuilt(registry, self.ref, self.local)
         current = self._registry_layers(registry)

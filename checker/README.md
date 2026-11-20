@@ -294,10 +294,15 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   **`docker_updates`**: does an image of a running container have an update in its registry? *Rebuilt*: the digest
   the registry gives for the tag (one `HEAD` on the manifest, which Docker Hub doesn't count as a pull) is none of
   the local image's `RepoDigests` (multi-arch images: the index digest on both sides). *Newer version*: a higher tag
-  with the same shape (`1.27.3-alpine` → `1.27.4-alpine`; not `1.27.4`, not `1.27.4-perl`): `versions = "minor"`
-  (default) allows the same major, `"major"` any, `"none"` only the digest. `latest` and other tags that aren't
-  versions are checked by digest only. An image started by digest (`image@sha256:...`) is skipped on purpose (the
-  summary says "1 pinned by digest, skipped"). **An image built locally is checked through its base image**: the base
+  with the same shape (`1.27.3-alpine` → `1.27.4-alpine`; not `1.27.4`, not `1.27.4-perl`): `versions = "major"`
+  (default) any newer one, `"minor"` within the same major, `"none"` only the digest. `latest` and other tags that
+  aren't versions are checked by digest only. **A version you decided not to take:** `skip = [{ image = "mariadb",
+  version = "11.8", until = 2027-03-01, why = "stay on the 11.4 LTS" }]` hides that version and older ones until the
+  date (`until = 0`: without end, on purpose); a newer one (`11.9`) shows again. The summary lists the skips that hid
+  something, and the ones that hid nothing ("remove it"); a rebuild of your own tag is never hidden. **Pinned by
+  digest** (`image:1.2@sha256:...`, also a base label): checked through its tag, "web (rebuilt, pinned)" when the tag
+  moved away from the pin. Only a digest without a tag is skipped ("1 pinned by digest without a tag, skipped").
+  **An image built locally is checked through its base image**: the base
   its Dockerfile names in a label (see [Images you build yourself](#images-you-build-yourself-name-the-base)), else
   a guess: the local registry image whose layers are the longest prefix of its own. The summary then says "myapp
   (base python:3.14-slim rebuilt, rebuild)" or "myapp (base python 3.14 → 3.15)". If there is no label and the base
@@ -453,7 +458,8 @@ The `ARG BASE` after `FROM` is needed: an `ARG` before `FROM` is not visible aft
 
 The checker then asks the registry for the base tag's layers and compares them with the bottom layers of your image
 (assumption: a rebuilt base has the same number of layers). A base pinned by digest (`python:3.13-slim@sha256:...`)
-is skipped like a pinned image, and its CVEs are `waiting`. The cost: Docker Hub counts a manifest `GET` as a pull but
+is checked through its tag: rebuilt when the tag's layers are no longer the pinned ones (then move the pin and
+rebuild); a digest without a tag is skipped, and its CVEs are `waiting`. The cost: Docker Hub counts a manifest `GET` as a pull but
 not a `HEAD`, so a run does one `HEAD` per base tag, and reads the manifests and the config only when the tag's
 digest has changed (remembered while the checker runs).
 

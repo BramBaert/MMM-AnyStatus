@@ -101,10 +101,20 @@ def test_a_label_that_is_not_an_image_name_falls_back_too(tmp_path: Path, docker
     assert "mine: base image not found" in core.summary
 
 
-def test_a_pinned_label_base_is_skipped_like_a_pinned_image(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
-    built(docker, f"{reg.host}/library/python:3.13-slim@{digest('pinned')}")
+def test_a_pinned_label_base_is_checked_through_its_tag(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    pinned = reg.add_image("library/python", "3.13-slim", {"linux/amd64": BASE})
+    built(docker, f"{reg.host}/library/python:3.13-slim@{pinned}")
+    _, core = updates_run(updates_build(tmp_path, docker, 'versions = "none"'))
+    assert core.summary == "all 1 image up to date"
+    reg.add_image("library/python", "3.13-slim", {"linux/amd64": [digest("n0"), digest("n1")]})  # the tag moved on
+    _, core = updates_run(updates_build(tmp_path, docker, 'versions = "none"'))
+    assert core.summary == f"1 image: mine (base {reg.host}/library/python:3.13-slim rebuilt, pinned, rebuild)"
+
+
+def test_a_label_base_pinned_without_a_tag_is_skipped(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    built(docker, f"{reg.host}/library/python@{digest('pinned')}")
     _, core = updates_run(updates_build(tmp_path, docker))
-    assert core.summary == "no images to check\n1 pinned by digest, skipped"
+    assert core.summary == "no images to check\n1 pinned by digest without a tag, skipped"
     assert reg.requests == []
 
 
@@ -167,7 +177,7 @@ def test_two_images_on_one_base_tag_are_judged_each_by_its_own_layers(tmp_path: 
     assert head_and_get(reg)[0] == 1  # the tag's digest is asked once for both images
 
 
-def test_a_pinned_label_base_waits(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+def test_a_pinned_label_base_waits_while_its_tag_is_the_pin(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     pinned = reg.add_image("library/python", "3.13-slim", {"linux/amd64": BASE})
     built(docker, f"{reg.host}/library/python:3.13-slim@{pinned}")
     command = write_fake_trivy(
@@ -177,7 +187,19 @@ def test_a_pinned_label_base_waits(tmp_path: Path, docker: FakeDocker, reg: Fake
     spec = vulns_build(tmp_path, docker, command, SCHEDULE)
     vulns_run(spec)
     assert rows(spec) == [("mine", "CVE-2026-6001", "waiting", "warn")]
-    assert head_and_get(reg)[0] == 0  # a digest needs no HEAD
+
+
+def test_a_pinned_label_base_whose_tag_moved_on_and_fixes_it_is_rebuild(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    pinned = reg.add_image("library/python", "3.13-slim", {"linux/amd64": BASE})
+    built(docker, f"{reg.host}/library/python:3.13-slim@{pinned}")
+    reg.add_image("library/python", "3.13-slim", {"linux/amd64": [digest("n0"), digest("n1")]})  # the tag moved on
+    outputs = {
+        "mine:1": trivy_json([("CVE-2026-6001", "HIGH", "1.1")], layer=BASE[0]),
+        f"remote:{reg.host}/library/python:3.13-slim": trivy_json([]),
+    }
+    spec = vulns_build(tmp_path, docker, write_fake_trivy(tmp_path, outputs), SCHEDULE)
+    vulns_run(spec)
+    assert rows(spec) == [("mine", "CVE-2026-6001", "rebuild", "warn")]
 
 
 def test_a_registry_that_fails_makes_everything_waiting_and_says_so(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:

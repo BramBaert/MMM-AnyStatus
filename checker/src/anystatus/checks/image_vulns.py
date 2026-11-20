@@ -36,7 +36,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -443,13 +443,14 @@ class ImageVulns(Check):
         if not fixable:
             return classes
         ref = safe_parse(target)
-        if ref is None or ref.digest is not None or ref.tag is None:
-            # Started by id or pinned by digest: there is no "newer build of the same tag" to update to.
+        if ref is None or ref.tag is None:
+            # Started by id, or by a digest without a tag: there is no "newer build of the same tag" to update to.
             classes.update({v.key: "waiting" for v in fixable})
             return classes
         local = run.store.inspect(image.image_id)
         if local.from_registry(ref):
-            newer = self._newer(ref, lambda: rebuilt(run.registry, ref, local), run, _short(target))
+            tag = replace(ref, digest=None)  # a pin is judged through its tag; moving the pin is the update
+            newer = self._newer(tag, lambda: rebuilt(run.registry, tag, local), run, _short(target))
             classes.update({v.key: "update" if newer is not None and v.key not in newer else "waiting" for v in fixable})
             return classes
         # Built here: what came with the base waits for (or is fixed by) a newer base; the rest is in the user's hands.
@@ -468,10 +469,10 @@ class ImageVulns(Check):
         from_base = [v for v in fixable if v.layer and v.layer in base_layers]
         classes.update({v.key: "rebuild" for v in fixable if v not in from_base})
         if from_base and base is not None:
-            if base.pinned:
-                classes.update({v.key: "waiting" for v in from_base})  # a pinned base has no newer build to expect
+            if base.pinned and base.ref.tag is None:
+                classes.update({v.key: "waiting" for v in from_base})  # a digest without a tag has no newer build
             else:
-                newer = self._newer(base.ref, lambda: base.rebuilt(run.registry), run, _short(target))
+                newer = self._newer(replace(base.ref, digest=None), lambda: base.rebuilt(run.registry), run, _short(target))
                 classes.update({v.key: "rebuild" if newer is not None and v.key not in newer else "waiting" for v in from_base})
         return classes
 

@@ -566,16 +566,33 @@ label = "Image updates"
 group = "docker"
 interval = "1d"
 show_after = { unknown = "3d" }   # a registry that is down for a day or two doesn't turn the card grey
-versions = "minor"            # newer tags within the same major (default); "major" includes major bumps; "none"
+versions = "major"            # any newer version (default); "minor": within the same major; "none": rebuilds only
 ignore = ["postgres"]         # images to skip
+skip = [                      # a newer version you decided not to take (yet)
+    { image = "mariadb", version = "11.8", until = 2027-03-01, why = "stay on the 11.4 LTS until 11.8 is tested" },
+]
 ```
 
 Per image of a running container:
 
 - **Rebuilt upstream:** the tag's registry digest differs from the running image's (`HEAD` on the manifest, which
   Docker Hub doesn't count as a pull).
-- **Newer version:** the registry has a higher version tag of the same form (`1.27.3-alpine` → `1.27.4-alpine`,
-  not → `1.28.0`). Only tags that read as versions count; `latest` is covered by the digest.
+- **Newer version:** the registry has a higher version tag of the same form: the same number of numeric parts, the
+  same `v` prefix and suffix (`11.4` → `11.8`, `1.27.3-alpine` → `1.27.4-alpine`, not → `1.27.4` or `11.8.2`). Only
+  tags that read as versions count; `latest` is covered by the digest. **The default is every newer version**
+  (`"major"`): the point of the check is to hear that a newer one exists, whether or not the tag floats on patches.
+  An exact tag (`1.13.2`) is told about `1.13.3` too.
+- **`skip`: a newer version not taken, on purpose.** Each entry names an image (as `ignore` does: by repository or
+  short name, or for an image built here its base's) and a version (`"11.8"`, written as the summary shows it). That
+  version and every older one are not reported for that image; a version newer than it is (`11.9`), with the summary
+  noting what was skipped. A rebuild of the running tag is never skipped. `until` (a date) is required, so a skip
+  can't be forgotten: from that day it no longer counts, and the config warns. `until = 0` is a skip without an end,
+  written out so it is a decision, not an omission. `why` is required. A skip that hid nothing in a run (the image
+  was moved past it, or the version is gone) is noted in the summary: remove it.
+- **Pinned by digest** (`image:tag@sha256:…`, also a base label with a digest): checked through its tag. The tag
+  rebuilt is "web (rebuilt, pinned)": `--update`-style pulling won't pick it up, the digest in the file has to move. A
+  newer version is reported as for any image (the version is changed by hand either way). A digest without a tag
+  (`image@sha256:…`) has nothing to compare with: skipped, and the summary says so.
 - **An image built locally: its base instead.** Docker records no base name, so the Dockerfile names it in the label
   `org.opencontainers.image.base.name` (the user docs show the `ARG`/`FROM`/`LABEL` snippet and the multi-stage trap).
   A label with a tag: that tag is the base, and its layers come from the registry: a `HEAD` for the tag's digest, then
@@ -584,8 +601,9 @@ Per image of a running container:
   one; attestation entries with os `unknown` are skipped), and `GET` the config blob for `rootfs.diff_ids`. A blob
   `GET` may be answered with a redirect to a CDN (Docker Hub, ghcr.io): one hop, https only, without the
   `Authorization` header. The base was rebuilt when those layers aren't the first ones of our image (assumption: a
-  rebuilt base kept its number of layers, so our first N layers are the old base's). A label with a digest is pinned:
-  skipped like a pinned image. No label, an empty one or one that isn't an image name: the guess. An image's layers
+  rebuilt base kept its number of layers, so our first N layers are the old base's). A label with a digest and a tag
+  is pinned: the base was rebuilt when the tag's layers differ from the pinned digest's ("myapp (base
+  python:3.13-slim rebuilt, pinned, rebuild)"). No label, an empty one or one that isn't an image name: the guess. An image's layers
   start with its base's, so the base is the local image, pulled from a registry and tagged, whose `RootFS.Layers` are
   the longest prefix of ours (equal counts: a `FROM` that adds no layer); `HEAD` and digests as for a pulled image.
   Its tag is asked about as above: "myapp (base python:3.14-slim rebuilt, rebuild)", "myapp (base python 3.14 →
@@ -653,15 +671,17 @@ schedule, marking those that matched nothing in the last scan and those that exp
 |---|---|---|
 | `update` | the image was pulled, its tag has a newer build in the registry, and that build doesn't have it | "mariadb: 1 critical, fixed, please update image" |
 | `rebuild` | the image is built locally, and either its base's tag has a newer build without it, or the package didn't come with the base (Trivy's `Layer.DiffID` is not one of the base's layers: your own Dockerfile installed it), or the base can't be found | "myapp: 2 critical, fixed, please rebuild image" |
-| `waiting` | a fixed version exists, but the newer build still has it, or there is no newer build (also: an image started by id or pinned by digest, and a registry that didn't answer) | "mariadb: 1 critical, waiting for upstream fix" |
+| `waiting` | a fixed version exists, but the newer build still has it, or there is no newer build (also: an image started by id or by a digest without a tag, and a registry that didn't answer) | "mariadb: 1 critical, waiting for upstream fix" |
 | `no_fix` | Trivy gives no fixed version (`Status` affected, will_not_fix, fix_deferred, end_of_life) | "mariadb: 1 critical, no fix exists" |
 
 "Upstream" was weighed against plain "waiting for fix": for those in the know it says more. The image's name comes
 first, so the text doesn't repeat it. Pulled or built locally, and the base of a built image (label first, the guess
 as fallback), are found as `docker_updates` finds them. The layers that came with the base are our first N layers,
 N being the layer count of the base tag in the registry. If the registry can't give them, every fixable CVE of that
-image is `waiting` that run (as for any registry that didn't answer) and the page notes "newer build not checked". A base pinned by a digest has no newer build:
-its CVEs are `waiting`.
+image is `waiting` that run (as for any registry that didn't answer) and the page notes "newer build not checked". **Pinned by digest with a tag** (the image, or a base label): judged
+through the tag, as `docker_updates` does. What its newer build fixes is `update` (a pulled image) or `rebuild` (a
+base), the same classes as without a pin: the pin is moved by hand, as a version is. Only a digest without a tag has no
+newer build to compare with: its CVEs are `waiting`.
 
 **Scans:** still one per image. An extra scan only for a tag that has a newer build: the image's own tag (pulled)
 or its base's (built locally, and only when a fixable CVE came with the base), straight from the registry

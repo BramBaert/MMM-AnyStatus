@@ -154,6 +154,8 @@ def test_a_newer_base_version(tmp_path: Path, docker: FakeDocker, reg: FakeRegis
     reg.add("library/python", "3.14-slim", index=base_digest)
     reg.tags = {"library/python": ["3.14-slim", "3.15-slim", "4.0-slim", "3.15"]}
     _, core = run(build(tmp_path, docker))
+    assert core.summary == f"1 image: anystatus-localtest (base {reg.host}/library/python 3.14 → 4.0)"
+    _, core = run(build(tmp_path, docker, 'versions = "minor"'))
     assert core.summary == f"1 image: anystatus-localtest (base {reg.host}/library/python 3.14 → 3.15)"
 
 
@@ -256,11 +258,11 @@ def test_a_newer_version_tag_is_a_warning(tmp_path: Path, docker: FakeDocker, re
         "acme/grafana": ["10.4", "11.2", "11.3", "12.0"],
         "acme/web": ["1.27.3-alpine", "1.27.4-alpine", "1.28.0"],
     }
-    _, core = run(build(tmp_path, docker))
+    _, core = run(build(tmp_path, docker))  # the default: any newer version
     assert (core.level, core.value) == ("warn", 2)
-    assert core.summary == "2 images: grafana 11.2 → 11.3, web 1.27.3 → 1.27.4"
-    _, core = run(build(tmp_path, docker, 'versions = "major"'))
     assert core.summary == "2 images: grafana 11.2 → 12.0, web 1.27.3 → 1.27.4"
+    _, core = run(build(tmp_path, docker, 'versions = "minor"'))
+    assert core.summary == "2 images: grafana 11.2 → 11.3, web 1.27.3 → 1.27.4"
     _, core = run(build(tmp_path, docker, 'versions = "none"'))
     assert core.summary == "1 image: web (rebuilt)"
 
@@ -291,14 +293,85 @@ def test_the_tag_list_is_bounded(tmp_path: Path, docker: FakeDocker, reg: FakeRe
 # --- skipped and ignored
 
 
-def test_an_image_started_by_digest_is_skipped(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+def test_an_image_started_by_a_digest_without_a_tag_is_skipped(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
     pinned = f"{reg.host}/acme/web@{digest('web-1')}"
     docker.add_container("web", pinned, "sha256:" + "3" * 64, [pinned], repo_tags=[])
     add(docker, reg, "db", "acme/db", "latest", digest("db-1"))
     reg.add("acme/db", "latest", manifest=digest("db-1"))
     _, core = run(build(tmp_path, docker))
-    assert core.level == "ok" and core.summary == "all 1 image up to date\n1 pinned by digest, skipped"
+    assert core.level == "ok" and core.summary == "all 1 image up to date\n1 pinned by digest without a tag, skipped"
     assert not any("/acme/web/" in p for _, p in reg.requests)
+
+
+def test_a_pinned_image_with_a_tag_is_checked_through_its_tag(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    pin = digest("web-1")
+    reference = f"{reg.host}/acme/web:1.2.3@{pin}"
+    docker.add_container("web", reference, "sha256:" + "3" * 64, [f"{reg.host}/acme/web@{pin}"])
+    reg.add("acme/web", "1.2.3", manifest=pin)
+    reg.tags = {"acme/web": ["1.2.3"]}
+    assert run(build(tmp_path, docker))[1].summary == "all 1 image up to date"
+    reg.add("acme/web", "1.2.3", manifest=digest("web-2"))  # the tag moved away from the pin
+    assert run(build(tmp_path, docker))[1].summary == "1 image: web (rebuilt, pinned)"
+    reg.tags = {"acme/web": ["1.2.3", "1.2.4"]}
+    assert run(build(tmp_path, docker))[1].summary == "1 image: web 1.2.3 → 1.2.4"
+
+
+# --- skip
+
+
+def skip_setup(docker: FakeDocker, reg: FakeRegistry, tags: list[str]) -> None:
+    add(docker, reg, "db", "acme/mariadb", "11.4", digest("db-1"))
+    reg.add("acme/mariadb", "11.4", manifest=digest("db-1"))
+    reg.tags = {"acme/mariadb": tags}
+
+
+def test_a_skipped_version_and_older_ones_are_not_reported(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    skip_setup(docker, reg, ["11.4", "11.6", "11.8"])
+    _, core = run(build(tmp_path, docker, 'skip = [{ image = "mariadb", version = "11.8", until = 2099-01-01, why = "LTS" }]'))
+    assert (core.level, core.summary) == ("ok", "all 1 image up to date\nskipped: mariadb 11.8 until 2099-01-01")
+
+
+def test_a_version_newer_than_the_skip_is_reported(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    skip_setup(docker, reg, ["11.4", "11.8", "12.0"])
+    _, core = run(build(tmp_path, docker, 'skip = [{ image = "mariadb", version = "11.8", until = 0, why = "LTS" }]'))
+    assert (core.level, core.summary) == ("warn", "1 image: mariadb 11.4 → 12.0\nskipped: mariadb 11.8 without end")
+
+
+def test_a_skip_that_hid_nothing_says_so(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    skip_setup(docker, reg, ["11.4"])
+    _, core = run(build(tmp_path, docker, 'skip = [{ image = "mariadb", version = "11.8", until = 0, why = "LTS" }]'))
+    assert core.summary == "all 1 image up to date\nskip of mariadb 11.8 hid nothing: remove it"
+
+
+def test_an_expired_skip_no_longer_counts_and_warns(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    skip_setup(docker, reg, ["11.4", "11.8"])
+    spec = build(tmp_path, docker, 'skip = [{ image = "mariadb", version = "11.8", until = 2020-01-01, why = "LTS" }]')
+    assert run(spec)[1].summary == "1 image: mariadb 11.4 → 11.8"
+
+
+def test_a_skip_never_hides_a_rebuild(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
+    skip_setup(docker, reg, ["11.4", "11.8"])
+    reg.add("acme/mariadb", "11.4", manifest=digest("db-2"))
+    _, core = run(build(tmp_path, docker, 'skip = [{ image = "mariadb", version = "11.8", until = 0, why = "LTS" }]'))
+    assert core.summary == "1 image: mariadb (rebuilt)\nskipped: mariadb 11.8 without end"
+
+
+@pytest.mark.parametrize(
+    ("skip", "message"),
+    [
+        ('"mariadb"', "'skip' must be a list of tables"),
+        ('[{ image = "mariadb", version = "11.8", why = "x" }]', "'skip' entry 1: missing 'until'"),
+        ('[{ image = "mariadb", version = "11.8", until = 0 }]', "missing 'why'"),
+        ('[{ image = "mariadb", version = "11.8", until = 0, why = "x", note = "y" }]', "unknown key 'note'"),
+        ('[{ image = "mariadb", version = "latest", until = 0, why = "x" }]', "'version' must read as a version"),
+        ('[{ image = "mariadb", version = "11.8", until = 5, why = "x" }]', "'until' must be a date"),
+        ('[{ image = "mariadb", version = "11.8", until = false, why = "x" }]', "'until' must be a date"),
+        ('[{ image = "", version = "11.8", until = 0, why = "x" }]', "must be non-empty text"),
+    ],
+)
+def test_skip_config_errors(tmp_path: Path, docker: FakeDocker, skip: str, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        build(tmp_path, docker, f"skip = {skip}")
 
 
 def test_a_container_that_shows_only_an_image_id_uses_the_images_tag(tmp_path: Path, docker: FakeDocker, reg: FakeRegistry) -> None:
