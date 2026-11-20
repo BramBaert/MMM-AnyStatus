@@ -284,7 +284,14 @@ Not planned yet; how they play out in practice decides their priority.
   `find_base`), then fix. A candidate fix if the base can't be found locally: the Dockerfile names its base once
   (an `ARG` used by `FROM` and by the label `org.opencontainers.image.base.name`), and the checker compares the
   base's current layers in the registry with the image's bottom layers. Rejected: having the deploy script pull
-  every base (it would have to parse the `FROM` lines).
+  every base (it would have to parse the `FROM` lines). **Checker or build?** (Bram asked, 2026-11-17): both. A
+  built image doesn't record its base, so the checker can only guess from the local image list, which stays fragile
+  whatever the cause above turns out to be. The label puts the fact in the image (build side, every own Dockerfile;
+  in a multi-stage build, the final stage's base: the final stage must repeat `ARG`, tested 2026-11-17); the checker
+  reads it and asks the registry (checker side), and keeps the guess for images without the label. **Cause found and
+  fixed 2026-11-17:** with BuildKit a base that only the build fetched is not in the image list at all, and a listed
+  copy from an earlier `docker pull` is older than what `build --pull` used, so its layers don't match. Fixed with
+  the label (the final stage must repeat `ARG BASE`, tested) and the registry's layer list; the guess stays as fallback.
 - **A green card waiting for a worse level keeps its old text** (seen 2026-11-13: `docker.updates`, waiting 14 days
   for `warn`, still showed text from the checker version before, with `ts` refreshed). `step()` in `judge.py` keeps
   the previous green `core` whole ("green stays as it was"), against its own docstring ("with this run's summary and

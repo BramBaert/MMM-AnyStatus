@@ -271,11 +271,12 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   with the same shape (`1.27.3-alpine` → `1.27.4-alpine`; not `1.27.4`, not `1.27.4-perl`): `versions = "minor"`
   (default) allows the same major, `"major"` any, `"none"` only the digest. `latest` and other tags that aren't
   versions are checked by digest only. An image started by digest (`image@sha256:...`) is skipped on purpose (the
-  summary says "1 pinned by digest, skipped"). **An image built locally is checked through its base image**: Docker
-  doesn't record the base's name, but an image's layers start with its base's, so the base is the local registry
-  image whose layers are the longest prefix of its own. The summary then says "myapp (base python:3.14-slim rebuilt,
-  rebuild)" or "myapp (base python 3.14 → 3.15)". If the base is no longer in the image store (`docker image prune`),
-  it says "myapp: base image not found (pruned?)" and the image doesn't count. Whether an image was built locally
+  summary says "1 pinned by digest, skipped"). **An image built locally is checked through its base image**: the base
+  its Dockerfile names in a label (see [Images you build yourself](#images-you-build-yourself-name-the-base)), else
+  a guess: the local registry image whose layers are the longest prefix of its own. The summary then says "myapp
+  (base python:3.14-slim rebuilt, rebuild)" or "myapp (base python 3.14 → 3.15)". If there is no label and the base
+  isn't in the image store (`docker image prune`), it says "myapp: base image not found (pruned?)" and the image
+  doesn't count. Whether an image was built locally
   comes from Docker 29's `Identity` field; older engines don't have it, and there an image with a `RepoDigest` counts
   as pulled, which is right for the classic image store but not for the containerd one (where a built image has a
   RepoDigest too). The value is the number
@@ -406,6 +407,29 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   # HIGH and MEDIUM left out, below CRITICAL: not counted. Every base image carries unfixed ones; counting them would
   # keep the card amber forever
   ```
+
+### Images you build yourself: name the base
+
+For an image you build (`docker compose build`), `docker_updates` and `image_vulns` need to know its base image: has
+the base been rebuilt upstream, and did a CVE come with the base or with your own layers? Docker records no base in
+the image, and BuildKit doesn't even list a base that only the build fetched, so a guess from the local image list
+often fails. Name the base in the Dockerfile with the standard label instead:
+
+```dockerfile
+ARG BASE=python:3.13-slim
+FROM ${BASE}
+ARG BASE
+LABEL org.opencontainers.image.base.name=${BASE}
+```
+
+The `ARG BASE` after `FROM` is needed: an `ARG` before `FROM` is not visible after it. In a **multi-stage build, repeat
+`ARG BASE` in the final stage**, or the label is the empty string and the checker falls back to guessing.
+
+The checker then asks the registry for the base tag's layers and compares them with the bottom layers of your image
+(assumption: a rebuilt base has the same number of layers). A base pinned by digest (`python:3.13-slim@sha256:...`)
+is skipped like a pinned image, and its CVEs are `waiting`. The cost: Docker Hub counts a manifest `GET` as a pull but
+not a `HEAD`, so a run does one `HEAD` per base tag, and reads the manifests and the config only when the tag's
+digest has changed (remembered while the checker runs).
 
 ### Read-only access to Docker
 

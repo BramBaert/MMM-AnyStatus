@@ -4,6 +4,7 @@ thread on 127.0.0.1) and a fake `trivy` program. No real Docker, registry or Tri
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sys
 import threading
@@ -222,13 +223,19 @@ class FakeDocker(_Server):
         digests: list[str],
         layers: list[str] | None = None,
         identity: dict[str, Any] | None = None,
+        base_label: str | None = None,
+        variant: str = "",
     ) -> None:
-        """A local image. `identity` as Docker 29 gives it ({"Pull": [{"Repository": ...}]} or {"Build": [...]});
-        None leaves it out, as older engines do."""
+        """A local image (linux/amd64). `identity` as Docker 29 gives it ({"Pull": [{"Repository": ...}]} or
+        {"Build": [...]}); None leaves it out, as older engines do. `base_label`: the base-name label."""
         self.images[image_id] = {
             "Id": image_id,
             "RepoTags": tags,
             "RepoDigests": digests,
+            "Os": "linux",
+            "Architecture": "amd64",
+            **({"Variant": variant} if variant else {}),
+            "Config": {"Labels": {"org.opencontainers.image.base.name": base_label} if base_label is not None else None},
             "RootFS": {"Type": "layers", "Layers": layers or []},
             **({"Identity": identity} if identity is not None else {}),
         }
@@ -287,6 +294,12 @@ class _RegistryHandler(BaseHTTPRequestHandler):
             else:
                 _send(self, 200, json.dumps({"token": o.token}).encode())
             return
+        if parts.path.startswith("/cdn/"):  # where blob redirects lead (no authorization needed)
+            if parts.path in o.cdn_redirects:
+                _send(self, 302, headers={"Location": o.cdn_redirects[parts.path]})
+            else:
+                _send(self, 200, o.cdn_blobs.get(parts.path, b"{}"))
+            return
         if not parts.path.startswith("/v2/"):
             _send(self, 404)
             return
@@ -299,8 +312,21 @@ class _RegistryHandler(BaseHTTPRequestHandler):
             repo = repo_path.split("/manifests/")[0].split("/tags/")[0]
             _send(self, 401, b"{}", {"WWW-Authenticate": f'{challenge},scope="repository:{repo}:pull"'})
             return
+        if "/blobs/" in repo_path:
+            repo, _, blob = repo_path.partition("/blobs/")
+            content = o.blobs.get((repo, blob))
+            if content is None:
+                _send(self, 404)
+            elif o.blob_location:
+                _send(self, 307, headers={"Location": f"{o.blob_location}/cdn/{blob}"})
+            else:
+                _send(self, 200, content)
+            return
         if "/manifests/" in repo_path:
             repo, _, tag = repo_path.partition("/manifests/")
+            if self.command == "GET" and (repo, tag) in o.documents:
+                _send(self, 200, o.documents[(repo, tag)], {"Content-Type": "application/json"})
+                return
             found = o.manifests.get((repo, tag))
             if found is None:
                 _send(self, 404)
@@ -349,11 +375,55 @@ class FakeRegistry(_Server):
         self.token_status = 200
         self.token_requests: list[dict[str, Any]] = []
         self.seen: list[dict[str, str]] = []
+        self.documents: dict[tuple[str, str], bytes] = {}  # (repo, tag or digest) -> what a manifest GET answers
+        self.blobs: dict[tuple[str, str], bytes] = {}  # (repo, digest) -> a blob
+        self.blob_location: str | None = None  # "http://host:port": blob GETs redirect to /cdn/<digest> there
+        self.cdn_blobs: dict[str, bytes] = {}  # path -> body, as the CDN serves it
+        self.cdn_redirects: dict[str, str] = {}  # path -> Location, a CDN that redirects again
         super().__init__()
 
     @property
     def host(self) -> str:
         return f"127.0.0.1:{self.port}"
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}"
+
+    def add_image(
+        self,
+        repo: str,
+        tag: str,
+        platforms: dict[str, list[str]],
+        multi_arch: bool = True,
+        attestation: bool = False,
+    ) -> str:
+        """A tag with real manifests and config blobs. `platforms` maps "os/arch" or "os/arch/variant" to that image's
+        layers (diff ids). Returns the tag's digest (the index's, or the one manifest's)."""
+        entries = []
+        for name, layers in platforms.items():
+            os_, arch, *variant = name.split("/")
+            platform = {"os": os_, "architecture": arch, **({"variant": variant[0]} if variant else {})}
+            config = json.dumps({**platform, "rootfs": {"type": "layers", "diff_ids": layers}}).encode()
+            config_digest = "sha256:" + hashlib.sha256(config).hexdigest()
+            manifest = json.dumps({"schemaVersion": 2, "config": {"digest": config_digest}, "layers": []}).encode()
+            manifest_digest = "sha256:" + hashlib.sha256(manifest).hexdigest()
+            self.blobs[(repo, config_digest)] = config
+            self.documents[(repo, manifest_digest)] = manifest
+            entries.append({"digest": manifest_digest, "platform": platform})
+        if attestation:  # BuildKit's attestation manifests come first and say os/architecture "unknown"
+            entries.insert(0, {"digest": digest(f"{repo}:{tag}:attestation"), "platform": {"os": "unknown", "architecture": "unknown"}})
+        if not multi_arch:
+            only = entries[-1]["digest"]
+            self.documents[(repo, tag)] = self.documents[(repo, only)]
+            self.manifests[(repo, tag)] = {"index": "", "manifest": only}
+            return str(only)
+        index = json.dumps({"schemaVersion": 2, "manifests": entries}).encode()
+        index_digest = "sha256:" + hashlib.sha256(index).hexdigest()
+        self.documents[(repo, tag)] = index
+        self.documents[(repo, index_digest)] = index
+        self.manifests[(repo, tag)] = {"index": index_digest, "manifest": entries[-1]["digest"]}
+        return index_digest
 
     def add(self, repo: str, tag: str, index: str | None = None, manifest: str | None = None) -> None:
         self.manifests[(repo, tag)] = {

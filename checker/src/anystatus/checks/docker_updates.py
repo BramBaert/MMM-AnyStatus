@@ -8,8 +8,9 @@ Per distinct image of a running container (see docs/checker.md):
 - *newer version*: the registry has a higher version tag of the same shape (same number of numeric parts, same
   `v` prefix and suffix, e.g. `-alpine`) - within the same major unless `versions = "major"`.
 
-An image built here is checked through its base image instead (found from the layers, see images.py): "myapp (base
-python:3.14-slim rebuilt, rebuild)". If its base is no longer in the image store, the summary says so.
+An image built here is checked through its base image instead (named by its label, else guessed from the layers, see
+images.py): "myapp (base python:3.14-slim rebuilt, rebuild)". If there is no label and the base is no longer in the
+image store, the summary says so.
 
 An image started by digest is skipped (pinned on purpose). The value is the number of images with an update, `warn` at
 most: `crit` is a config error. One registry failing makes that image unknown; the whole check is `unknown` only if no
@@ -187,14 +188,18 @@ class DockerUpdates(Check):
         try:
             local = store.inspect(image.image_id)
             base_name = ""
-            if not local.from_registry(ref):
+            if local.from_registry(ref):
+                was_rebuilt = rebuilt(registry, ref, local)
+            else:
                 # Built here (or tagged here from another image): its registry is the base's. See images.py.
-                base = store.find_base(local)
+                base = store.base_of(local)
                 if base is None:
                     return _Verdict(label, "no base")
-                ref, local, base_name = base.ref, base.image, base.name
+                if base.pinned:
+                    return _Verdict(label, "skipped", "pinned")
+                ref, base_name = base.ref, base.name
+                was_rebuilt = base.rebuilt(registry)
             assert ref.tag is not None
-            was_rebuilt = rebuilt(registry, ref, local)
             newer: str | None = None
             truncated = False
             if self.versions != "none" and parse_version_tag(ref.tag) is not None:

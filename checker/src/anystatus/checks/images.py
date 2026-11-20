@@ -6,20 +6,27 @@ don't have `Identity`; there an image with `RepoDigests` counts as pulled. That 
 store, but with the containerd image store (the default of new installs) a locally built image has a RepoDigest too
 (`myapp@sha256:...`): on such an engine before Docker 29 it still looks like a registry image.
 
-**The base of an image built here.** Docker records no name for it (no label, and the history doesn't name it), but
-an image's layers start with its base's layers. So the base is the local registry image whose `RootFS.Layers` are
-the longest prefix of ours. A base that is no longer in the image store (`docker image prune`) can't be found.
+**The base of an image built here.** Docker records no base name, so the Dockerfile says it:
+`LABEL org.opencontainers.image.base.name=python:3.13-slim`. With a tag, the base is that tag and its layers come
+from the registry (`RegistryClient.layer_ids`, one HEAD per run while the tag is unchanged); with a digest it is
+pinned. The image's first layers are the base's, so a base whose registry layers differ from our first ones was
+rebuilt (assuming a rebuilt base kept its number of layers). Without a usable label the base is guessed: the local
+registry image whose `RootFS.Layers` are the longest prefix of ours. That fails when the base is no longer in the
+image store (`docker image prune`), or was never listed (BuildKit doesn't list a base only the build fetched), or
+is an older copy than the build used.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from anystatus.checks.docker_api import DockerClient, RunningImage, image_details, image_list
-from anystatus.checks.registry import ImageRef, RegistryClient, parse_image
+from anystatus.checks.registry import ImageRef, Platform, RegistryClient, parse_image
 from anystatus.table import Table
+
+BASE_LABEL = "org.opencontainers.image.base.name"
 
 
 @dataclass(frozen=True)
@@ -29,6 +36,8 @@ class LocalImage:
     digests: tuple[str, ...]  # RepoDigests
     layers: tuple[str, ...]  # RootFS.Layers (diff ids)
     pulled_from: frozenset[tuple[str, str]] | None  # (registry, repository) per Identity.Pull; None: Docker doesn't say
+    base_label: str | None  # the base the Dockerfile names; empty or missing: None
+    platform: Platform
 
     @classmethod
     def from_inspect(cls, data: dict[str, Any]) -> LocalImage:
@@ -45,12 +54,17 @@ class LocalImage:
                 if isinstance(repository, str) and (ref := safe_parse(repository)) is not None:
                     found.add((ref.registry, ref.repository))
             pulled = frozenset(found)
+        config = data.get("Config")
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        label = labels.get(BASE_LABEL) if isinstance(labels, dict) else None
         return cls(
             id=str(data.get("Id", "")),
             tags=strings(data.get("RepoTags")),
             digests=strings(data.get("RepoDigests")),
             layers=strings(rootfs.get("Layers")) if isinstance(rootfs, dict) else (),
             pulled_from=pulled,
+            base_label=label.strip() or None if isinstance(label, str) else None,
+            platform=Platform(str(data.get("Os") or ""), str(data.get("Architecture") or ""), str(data.get("Variant") or "")),
         )
 
     def registry_repos(self) -> set[tuple[str, str]]:
@@ -81,18 +95,49 @@ class LocalImage:
         return None
 
 
-@dataclass(frozen=True)
+@dataclass
 class Base:
-    image: LocalImage
-    ref: ImageRef  # the tag the registry is asked about
+    """The base of an image built here, named by its label or guessed from the local images."""
+
+    ref: ImageRef  # the tag the registry is asked about (with a digest: pinned)
+    built: LocalImage  # the image built here
+    local: LocalImage | None = None  # the guessed base, as found in the image store; None: named by the label
+    _current: tuple[str, ...] | None = field(default=None, init=False, repr=False)
 
     @property
     def name(self) -> str:
         """As a user wrote it in FROM: `python:3.14-slim`, `grafana/grafana:11.2`, `ghcr.io/org/app:1`."""
         return display_name(self.ref)
 
+    @property
+    def pinned(self) -> bool:
+        return self.ref.digest is not None
+
+    def layers(self, registry: RegistryClient) -> tuple[str, ...]:
+        """The layers of `built` that came with the base. Raises RegistryError (a label base asks the registry)."""
+        if self.local is not None:
+            return self.local.layers
+        return self.built.layers[: len(self._registry_layers(registry))]
+
+    def rebuilt(self, registry: RegistryClient) -> bool:
+        """Has the base been rebuilt since `built` was built? A pinned base never is. Raises RegistryError."""
+        if self.pinned:
+            return False
+        if self.local is not None:
+            return rebuilt(registry, self.ref, self.local)
+        current = self._registry_layers(registry)
+        # A rebuilt base is assumed to have kept its number of layers, so our first len(current) layers are the old base's.
+        return self.built.layers[: len(current)] != current
+
+    def _registry_layers(self, registry: RegistryClient) -> tuple[str, ...]:
+        if self._current is None:
+            self._current = registry.layer_ids(self.ref, self.built.platform)
+        return self._current
+
 
 def display_name(ref: ImageRef) -> str:
+    if ref.tag is None:
+        return f"{ref.repository}@{ref.digest}"
     repository = ref.repository
     if ref.registry == "registry-1.docker.io":
         repository = repository.removeprefix("library/")
@@ -134,12 +179,20 @@ class ImageStore:
             self._inspected[image_id] = LocalImage.from_inspect(image_details(self._client, image_id, self._left()))
         return self._inspected[image_id]
 
-    def find_base(self, image: LocalImage) -> Base | None:
+    def base_of(self, image: LocalImage) -> Base | None:
+        """The base of an image built here: the one its label names, else the guess of `_guess_base`. No registry
+        call: `Base` makes those when asked. None when there is no label and no guess."""
+        if image.base_label is not None and (ref := safe_parse(image.base_label)) is not None:
+            return Base(ref, image)
+        return self._guess_base(image)
+
+    def _guess_base(self, image: LocalImage) -> Base | None:
         """The registry image whose layers are the longest prefix of `image`'s (equal layers count: a FROM with no
         layer of its own). None when there is none, e.g. because the base was pruned."""
         if not image.layers:
             return None
         best: Base | None = None
+        best_layers = 0
         for candidate in self._registry_images():
             n = len(candidate.layers)
             if not n or n > len(image.layers) or image.layers[:n] != candidate.layers:
@@ -147,8 +200,8 @@ class ImageStore:
             if candidate.id == image.id and candidate.pulled_from is None:
                 continue  # the same image, and Docker can't say where it came from
             tag = candidate.registry_tag()
-            if tag is not None and (best is None or n > len(best.image.layers)):
-                best = Base(candidate, tag)
+            if tag is not None and n > best_layers:
+                best, best_layers = Base(tag, image, candidate), n
         return best
 
     def _registry_images(self) -> list[LocalImage]:

@@ -50,7 +50,7 @@ from anystatus.checks.docker_api import (
     running_images,
 )
 from anystatus.checks.exec_cmd import run_process
-from anystatus.checks.images import ImageStore, LocalImage, display_name, is_ignored, rebuilt, registry_credentials, safe_parse
+from anystatus.checks.images import ImageStore, display_name, is_ignored, rebuilt, registry_credentials, safe_parse
 from anystatus.checks.registry import ImageRef, RegistryClient, RegistryError
 from anystatus.errors import mask
 from anystatus.judge import lasted
@@ -213,7 +213,7 @@ class _Run:
     store: ImageStore
     registry: RegistryClient
     left: Callable[[], float]
-    newer_scans: dict[str, set[tuple[str, str]] | _Unchecked | None] = field(default_factory=dict)
+    newer_scans: dict[str, set[tuple[str, str]] | _Unchecked] = field(default_factory=dict)  # tag -> its registry build's CVEs
     unchecked: list[str] = field(default_factory=list)
 
 
@@ -449,32 +449,50 @@ class ImageVulns(Check):
             return classes
         local = run.store.inspect(image.image_id)
         if local.from_registry(ref):
-            newer = self._newer(ref, local, run, _short(target))
+            newer = self._newer(ref, lambda: rebuilt(run.registry, ref, local), run, _short(target))
             classes.update({v.key: "update" if newer is not None and v.key not in newer else "waiting" for v in fixable})
             return classes
         # Built here: what came with the base waits for (or is fixed by) a newer base; the rest is in the user's hands.
-        base = run.store.find_base(local)
-        base_layers = set(base.image.layers) if base is not None else set()
+        base = run.store.base_of(local)
+        base_layers: set[str] = set()
+        if base is not None:
+            try:
+                base_layers = set(base.layers(run.registry))
+            except RegistryError as exc:
+                # Which layers are the base's is unknown this run: like any registry that didn't answer, waiting (a
+                # hiccup must not turn the card red), and the note says why.
+                log.info("image_vulns: layers of base %s not read: %s", base.name, exc.summary)
+                run.unchecked.append(_short(target))
+                classes.update({v.key: "waiting" for v in fixable})
+                return classes
         from_base = [v for v in fixable if v.layer and v.layer in base_layers]
         classes.update({v.key: "rebuild" for v in fixable if v not in from_base})
         if from_base and base is not None:
-            newer = self._newer(base.ref, base.image, run, _short(target))
-            classes.update({v.key: "rebuild" if newer is not None and v.key not in newer else "waiting" for v in from_base})
+            if base.pinned:
+                classes.update({v.key: "waiting" for v in from_base})  # a pinned base has no newer build to expect
+            else:
+                newer = self._newer(base.ref, lambda: base.rebuilt(run.registry), run, _short(target))
+                classes.update({v.key: "rebuild" if newer is not None and v.key not in newer else "waiting" for v in from_base})
         return classes
 
-    def _newer(self, ref: ImageRef, local: LocalImage, run: _Run, shown: str) -> set[tuple[str, str]] | None:
-        """The (CVE, package) pairs in the newer build of `ref`, None when the registry has no newer build. Each tag
-        is asked about and scanned once per run. A registry or scan that fails is noted (the image's fixable
-        vulnerabilities then count as waiting)."""
+    def _newer(self, ref: ImageRef, is_rebuilt: Callable[[], bool], run: _Run, shown: str) -> set[tuple[str, str]] | None:
+        """The (CVE, package) pairs in the newer build of `ref`, None when the registry has no build newer than this
+        image (`is_rebuilt`). Whether it is newer depends on each image's own layers, so that is asked per image (the
+        registry client asks each tag once per run); the scan of the tag's registry build is per tag, once per run. A
+        registry or scan that fails is noted (the image's fixable vulnerabilities then count as waiting)."""
         name = display_name(ref)
+        try:
+            if not is_rebuilt():
+                return None
+        except RegistryError as exc:
+            log.info("image_vulns: newer build of %s not checked: %s", name, exc.summary)
+            run.unchecked.append(shown)
+            return None
         if name not in run.newer_scans:
             try:
-                if rebuilt(run.registry, ref, local):
-                    run.newer_scans[name] = {v.key for v in self._scan(name, run.left(), remote=True)}
-                else:
-                    run.newer_scans[name] = None
-            except (RegistryError, CheckFailure) as exc:
-                log.info("image_vulns: newer build of %s not checked: %s", name, getattr(exc, "summary", type(exc).__name__))
+                run.newer_scans[name] = {v.key for v in self._scan(name, run.left(), remote=True)}
+            except CheckFailure as exc:
+                log.info("image_vulns: newer build of %s not scanned: %s", name, exc.summary)
                 run.newer_scans[name] = _Unchecked()
         result = run.newer_scans[name]
         if isinstance(result, _Unchecked):

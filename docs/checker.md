@@ -524,12 +524,23 @@ Per image of a running container:
   Docker Hub doesn't count as a pull).
 - **Newer version:** the registry has a higher version tag of the same form (`1.27.3-alpine` → `1.27.4-alpine`,
   not → `1.28.0`). Only tags that read as versions count; `latest` is covered by the digest.
-- **An image built locally: its base instead.** Docker records no name for the base (no label, and the history
-  doesn't name it), but an image's layers start with its base's. So the base is the local image, pulled from a
-  registry and tagged, whose `RootFS.Layers` are the longest prefix of ours (equal counts: a `FROM` that adds no
-  layer). Its tag is asked about as above: "myapp (base python:3.14-slim rebuilt, rebuild)", "myapp (base python
-  3.14 → 3.15)". A base that is no longer in the image store (`docker image prune`) can't be found: the summary says
-  "myapp: base image not found (pruned?)" and the image doesn't count, rather than being `unknown`.
+- **An image built locally: its base instead.** Docker records no base name, so the Dockerfile names it in the label
+  `org.opencontainers.image.base.name` (the user docs show the `ARG`/`FROM`/`LABEL` snippet and the multi-stage trap).
+  A label with a tag: that tag is the base, and its layers come from the registry: a `HEAD` for the tag's digest, then
+  (only for a digest not seen before, remembered per registry, repository, digest and platform, at most 64) `GET` the
+  manifest or index, `GET` the manifest of the platform of the local image (os, architecture, and variant when it has
+  one; attestation entries with os `unknown` are skipped), and `GET` the config blob for `rootfs.diff_ids`. A blob
+  `GET` may be answered with a redirect to a CDN (Docker Hub, ghcr.io): one hop, https only, without the
+  `Authorization` header. The base was rebuilt when those layers aren't the first ones of our image (assumption: a
+  rebuilt base kept its number of layers, so our first N layers are the old base's). A label with a digest is pinned:
+  skipped like a pinned image. No label, an empty one or one that isn't an image name: the guess. An image's layers
+  start with its base's, so the base is the local image, pulled from a registry and tagged, whose `RootFS.Layers` are
+  the longest prefix of ours (equal counts: a `FROM` that adds no layer); `HEAD` and digests as for a pulled image.
+  Its tag is asked about as above: "myapp (base python:3.14-slim rebuilt, rebuild)", "myapp (base python 3.14 →
+  3.15)". A registry error on the label base makes the image `unknown`. Without a label, a base that is no longer in
+  the image store (`docker image prune`), was never listed (BuildKit doesn't list a base only the build fetched) or
+  is an older copy can't be found: the summary says "myapp: base image not found (pruned?)" and the image doesn't
+  count, rather than being `unknown`.
 - **Built locally or pulled?** Docker 29's image inspect says so: `Identity` is `{"Pull": [{"Repository": ...}]}`
   for a pulled image and `{"Build": [...]}` for a built one; an image tagged locally under another name counts as
   built (its tag isn't in the registry it came from). Older engines have no `Identity`: there an image with a
@@ -594,14 +605,19 @@ schedule, marking those that matched nothing in the last scan and those that exp
 | `no_fix` | Trivy gives no fixed version (`Status` affected, will_not_fix, fix_deferred, end_of_life) | "mariadb: 1 critical, no fix exists" |
 
 "Upstream" was weighed against plain "waiting for fix": for those in the know it says more. The image's name comes
-first, so the text doesn't repeat it. Pulled or built locally, and the base of a built image, are found as
-`docker_updates` finds them.
+first, so the text doesn't repeat it. Pulled or built locally, and the base of a built image (label first, the guess
+as fallback), are found as `docker_updates` finds them. The layers that came with the base are our first N layers,
+N being the layer count of the base tag in the registry. If the registry can't give them, every fixable CVE of that
+image is `waiting` that run (as for any registry that didn't answer) and the page notes "newer build not checked". A base pinned by a digest has no newer build:
+its CVEs are `waiting`.
 
 **Scans:** still one per image. An extra scan only for a tag that has a newer build: the image's own tag (pulled)
 or its base's (built locally, and only when a fixable CVE came with the base), straight from the registry
 (`trivy image --image-src remote <tag>`), each tag at most once per run. Whether a tag has a newer build is one
-manifest `HEAD`, as in `docker_updates` (with its `registry_auth_env`). No second check scans everything again, and
-no CVE is reported twice.
+manifest `HEAD`, as in `docker_updates` (with its `registry_auth_env`), once per tag per run. **"Newer" is decided per
+image**, against that image's own layers: two images built on the same base tag, one before and one after the base
+was rebuilt, get different answers; only the scan of the tag's registry build is shared. No second check scans
+everything again, and no CVE is reported twice.
 
 **The schedule** (`[check.schedule.<class>]`, `SEVERITY = { warn = "...", crit = "..." }`): per class and
 severity, a `warn` and a `crit` time with the rules of `show_after` (`s`, `m`, `h`, `d`, `"0d"`, `"never"`), per
