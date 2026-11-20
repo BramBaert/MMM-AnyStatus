@@ -71,6 +71,8 @@ You can use the module more than once, each with its own `checkerUrl`.
   how long it has been so ("since 3 d").
 - **What passes:** hidden by default; tap "N checks" / "N ok" (or set `showOk: true`) to list the green checks per
   group. With a mouse, a check's summary shows as a tooltip.
+- **In a right-hand region** (`top_right`, `bottom_right`) the layout is mirrored: aligned right, with the colour
+  edge on the outside.
 - **The age rule**, applied every 15 seconds on the display itself, not only when data arrives: a result older than
   `ts + ttl` turns grey ("no data"), and one from more than `ttl` in the future turns grey ("clock mismatch"). If
   the checker can't be reached, the last results stay and age out by themselves, and one grey item says "unreachable".

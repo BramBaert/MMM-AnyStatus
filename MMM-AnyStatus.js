@@ -53,6 +53,8 @@ Module.register("MMM-AnyStatus", {
 		if (!this.wrapper) {
 			this.wrapper = document.createElement("div");
 			this.wrapper.className = "anystatus";
+			// In a right-hand region (top_right, bottom_right) the layout is mirrored: aligned right, colour edge outside.
+			if (/_right$/.test(this.data.position || "")) this.wrapper.classList.add("as-right");
 			this.ok = this.element("div", "as-ok");
 			this.list = this.element("div", "as-list");
 			this.foot = this.element("div", "as-foot");

@@ -122,3 +122,31 @@
 .anystatus .as-oknames {
 	color: var(--as-ok);
 }
+
+/* In a right-hand region: mirrored, so the colour edge is on the screen's edge and the text lines up on the right. */
+.anystatus.as-right {
+	text-align: right;
+	margin-left: auto;
+}
+.anystatus.as-right .as-card {
+	grid-template-columns: auto 1fr;
+	border-left: none;
+	border-right: 0.3em solid var(--as-unknown);
+}
+.anystatus.as-right .as-card[data-level="crit"] { border-right-color: var(--as-crit); }
+.anystatus.as-right .as-card[data-level="warn"] { border-right-color: var(--as-warn); }
+.anystatus.as-right .as-card[data-level="unknown"] { border-right-color: var(--as-unknown); }
+.anystatus.as-right .as-label,
+.anystatus.as-right .as-summary {
+	grid-column: 2;
+}
+.anystatus.as-right .as-meta {
+	grid-column: 1;
+}
+.anystatus.as-right .as-foot {
+	text-align: left;
+}
+.anystatus.as-right .as-okrow {
+	border-left: none;
+	border-right: 0.3em solid var(--as-ok);
+}
