@@ -7,6 +7,7 @@ Module.register("MMM-AnyStatus", {
 		checkerUrl: null, // required: base URL of the checker, e.g. "http://checker.example:8099"
 		fetchInterval: 60 * 1000, // ms between fetches of <checkerUrl>/results
 		maxItems: 6, // more non-green items than this collapse to one count per group
+		showOk: false, // list the green checks too; tapping the "N checks" / "N ok" line toggles it on screen
 	},
 
 	// How often the display is redrawn from what it has, so ages and the age rule stay current even when no
@@ -27,6 +28,7 @@ Module.register("MMM-AnyStatus", {
 		this.lastFeedAt = null; // when ANYSTATUS_RESULTS last arrived
 		this.cards = new Map(); // key -> element
 		this.wrapper = null;
+		this.showOk = this.config.showOk === true; // toggled by a tap; back to the config's value on a reload
 		this.fetchInterval = Math.max(5000, Number(this.config.fetchInterval) || this.defaults.fetchInterval);
 
 		if (this.config.checkerUrl) {
@@ -54,7 +56,18 @@ Module.register("MMM-AnyStatus", {
 			this.ok = this.element("div", "as-ok");
 			this.list = this.element("div", "as-list");
 			this.foot = this.element("div", "as-foot");
-			this.wrapper.append(this.ok, this.list, this.foot);
+			// The list of green checks. Its one child is what folds open (see the CSS).
+			this.okList = this.element("div", "as-oklist");
+			this.okList.append(this.element("div", "as-oklist-inner"));
+			this.wrapper.append(this.ok, this.list, this.foot, this.okList);
+			// On a touch screen or with a mouse, the "N checks" line under All OK and the "N ok" footer open and close it.
+			const toggle = (event) => {
+				if (!event.target.closest(".as-toggle")) return;
+				this.showOk = !this.showOk;
+				this.render();
+			};
+			this.ok.addEventListener("click", toggle);
+			this.foot.addEventListener("click", toggle);
 			this.render();
 		}
 		return this.wrapper;
@@ -111,10 +124,38 @@ Module.register("MMM-AnyStatus", {
 		}
 		this.reconcile(wanted);
 
+		const canOpen = view.okCount > 0;
+		const arrow = canOpen ? (this.showOk ? " ▾" : " ▸") : "";
 		this.wrapper.classList.toggle("as-is-ok", view.level === "ok");
+		this.wrapper.classList.toggle("as-show-ok", this.showOk && canOpen);
 		this.ok.textContent = "";
-		this.ok.append(this.element("div", "as-ok-title", "All OK"), this.element("div", "as-ok-sub", view.total === 0 ? "no checks reported" : `${view.okCount} checks`));
-		this.foot.textContent = view.level !== "ok" && view.okCount > 0 ? `${view.okCount} ok` : "";
+		const sub = this.element("div", "as-ok-sub", view.total === 0 ? "no checks reported" : `${view.okCount} checks${arrow}`);
+		sub.classList.toggle("as-toggle", canOpen);
+		this.ok.append(this.element("div", "as-ok-title", "All OK"), sub);
+		this.foot.textContent = "";
+		if (view.level !== "ok" && canOpen) this.foot.append(this.element("span", "as-toggle", `${view.okCount} ok${arrow}`));
+		this.renderOk(view.ok);
+	},
+
+	// The green checks, one row per group: the group's name, then its checks (each one's summary as a tooltip).
+	renderOk(groups) {
+		const inner = this.okList.firstChild;
+		inner.textContent = "";
+		for (const entry of groups) {
+			const row = this.element("div", "as-okrow");
+			// Items without a group are "other" next to named groups, and need no heading when they are all there is.
+			const heading = entry.group !== null ? entry.group : groups.length > 1 ? "other" : "";
+			if (heading) row.append(this.element("div", "as-okgroup", heading));
+			const names = this.element("div", "as-oknames");
+			entry.members.forEach((m, i) => {
+				if (i > 0) names.append(", ");
+				const span = this.element("span", "as-okname", m.label);
+				if (m.summary) span.title = m.summary;
+				names.append(span);
+			});
+			row.append(names);
+			inner.append(row);
+		}
 	},
 
 	reconcile(wanted) {

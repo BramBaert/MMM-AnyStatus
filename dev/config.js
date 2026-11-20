@@ -14,8 +14,8 @@ const config = {
 		{
 			module: "MMM-AnyStatus",
 			position: "top_left",
-			header: "Healthy checker (rotating): all OK, mixed, stale",
-			config: { checkerUrl: "http://demo:8099/rotate/all-ok,mixed,stale", fetchInterval: 5 * 1000, maxItems: 6 },
+			header: "Healthy (rotating), showOk", // all OK, mixed, stale, with the green checks listed (tap 'N checks' / 'N ok')
+			config: { checkerUrl: "http://demo:8099/rotate/all-ok,mixed,stale", fetchInterval: 5 * 1000, maxItems: 6, showOk: true },
 		},
 		{
 			module: "MMM-AnyStatus",

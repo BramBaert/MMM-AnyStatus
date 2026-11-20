@@ -248,7 +248,8 @@ It has to be easy for other people:
   or state on a topic is a status where it lives, so it gets a check type (`mqtt` in [checker.md](checker.md)).
 - **Read-only Docker access:** decided (above).
 - **Limits in `config.js`** instead of the checker, for users who only want MMM-MysqlQuery-style checks? Not in v1.
-- **Touch screens:** tap to expand a card? Not in v1.
+- **Touch screens:** tap to expand a card? Not in v1. What *is* in: tapping "N checks" / "N ok" opens a list of the
+  green checks per group (also the `showOk` option, for a display without input).
 - **The name:** free on 2026-11-11 (not in the module list on MagicMirror's wiki, no GitHub repository, not on npm);
   still to confirm by hand on modules.magicmirror.builders. **AnyStatus** is also an open-source Windows dashboard
   for CI/CD (github.com/AnyStatus/AnyStatus): not a conflict, but searches may find it first.

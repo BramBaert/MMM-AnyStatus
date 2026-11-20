@@ -89,3 +89,36 @@
 	color: var(--color-text-dimmed, #666);
 	text-align: right;
 }
+
+/* What opens and closes the list of green checks (only with a touch screen or a mouse). */
+.anystatus .as-toggle {
+	cursor: pointer;
+}
+
+/* The list of green checks: folds open from nothing to its own height (grid rows 0fr -> 1fr). */
+.anystatus .as-oklist {
+	display: grid;
+	grid-template-rows: 0fr;
+	opacity: 0;
+	transition: grid-template-rows 0.6s ease, opacity 0.6s ease;
+}
+.anystatus.as-show-ok .as-oklist {
+	grid-template-rows: 1fr;
+	opacity: 1;
+}
+.anystatus .as-oklist-inner {
+	min-height: 0;
+	overflow: hidden;
+}
+.anystatus .as-okrow {
+	margin-top: 0.3em;
+	padding: 0.2em 0.7em;
+	border-left: 0.3em solid var(--as-ok);
+	font-size: 0.8em;
+}
+.anystatus .as-okgroup {
+	color: var(--color-text-dimmed, #666);
+}
+.anystatus .as-oknames {
+	color: var(--as-ok);
+}

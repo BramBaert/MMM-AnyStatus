@@ -350,3 +350,25 @@ test("resultsUrl joins without doubling slashes", () => {
 	assert.equal(S.resultsUrl("http://checker.example:8099"), "http://checker.example:8099/results");
 	assert.equal(S.resultsUrl("http://checker.example:8099///"), "http://checker.example:8099/results");
 });
+
+test("arrange: the green items, per group by name, without a group last, members by label", () => {
+	const items = [
+		{ ...item("ok", "b", null, "web"), summary: "200 OK" },
+		item("ok", "z"),
+		item("ok", "a", null, "web"),
+		item("crit", "c", 1, "backups"),
+		item("ok", "d", null, "backups"),
+		item("ok", "y"),
+	];
+	const view = S.arrange(items, 6);
+	assert.deepEqual(view.ok.map((g) => [g.group, g.members.map((m) => m.label)]), [["backups", ["d"]], ["web", ["a", "b"]], [null, ["y", "z"]]]);
+	assert.equal(view.ok[1].members[1].summary, "200 OK");
+});
+
+test("arrange: the green items are all listed, also when the problems collapse", () => {
+	const items = [...Array.from({ length: 8 }, (_, i) => item("warn", `w${i}`, i, "g")), ...Array.from({ length: 30 }, (_, i) => item("ok", `o${String(i).padStart(2, "0")}`, null, "g"))];
+	const view = S.arrange(items, 6);
+	assert.equal(view.groups.length, 1);
+	assert.equal(view.ok[0].members.length, 30);
+	assert.deepEqual(S.arrange([item("crit", "c")], 6).ok, []);
+});

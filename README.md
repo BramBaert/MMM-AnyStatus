@@ -60,6 +60,7 @@ To see it in a real MagicMirror without installing anything but Docker, see [CON
 | `checkerUrl` | none, **required** | Base URL of the checker (or any producer of [SPEC.md](SPEC.md)). The module fetches `<checkerUrl>/results`. |
 | `fetchInterval` | `60000` | Milliseconds between fetches (at least 5000). |
 | `maxItems` | `6` | Show at most this many cards. With more non-green items, the display collapses to one row per `group`, listing up to 4 of its names (coloured by level) and "+N more". |
+| `showOk` | `false` | Also list the green checks, one row per `group`, under "All OK" or under the problems. On a touch screen or with a mouse, tapping the "N checks" line (under "All OK") or the "N ok" line (under the problems) opens and closes the list; a reload goes back to this setting. |
 
 You can use the module more than once, each with its own `checkerUrl`.
 
@@ -68,6 +69,8 @@ You can use the module more than once, each with its own `checkerUrl`.
 - **All green:** "All OK".
 - **Otherwise:** only the non-green items, red first, then grey, then amber. Each shows its label, the reason, and
   how long it has been so ("since 3 d").
+- **What passes:** hidden by default; tap "N checks" / "N ok" (or set `showOk: true`) to list the green checks per
+  group. With a mouse, a check's summary shows as a tooltip.
 - **The age rule**, applied every 15 seconds on the display itself, not only when data arrives: a result older than
   `ts + ttl` turns grey ("no data"), and one from more than `ttl` in the future turns grey ("clock mismatch"). If
   the checker can't be reached, the last results stay and age out by themselves, and one grey item says "unreachable".
