@@ -15,6 +15,13 @@ Worse = Literal["above", "below"]
 
 
 @dataclass(frozen=True)
+class Limits:
+    warn: float | None
+    crit: float | None
+    worse: Worse
+
+
+@dataclass(frozen=True)
 class Observation:
     """A check that decides its own level (a custom function, a Nagios plugin, a Docker status)."""
 

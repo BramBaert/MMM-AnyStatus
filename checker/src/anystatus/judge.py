@@ -12,7 +12,8 @@ from anystatus.model import LEVELS, Core, Failure, Level, Observation, Outcome, 
 from anystatus.timeutil import format_duration
 
 if TYPE_CHECKING:
-    from anystatus.config import CheckSpec, Limits
+    from anystatus.config import CheckSpec
+    from anystatus.model import Limits
 
 MAX_SUMMARY = 400
 
@@ -88,9 +89,15 @@ def judge(spec: CheckSpec, outcome: Outcome) -> Core:
     else:  # pragma: no cover - Outcome is closed
         raise TypeError(type(outcome))
 
-    if spec.summary is not None:
+    # A placeholder this run has no value for ({age} when `null` named the level, sql_age's "no rows"): the type's own
+    # text says more than a template with a hole in it
+    if spec.summary is not None and _placeholders(spec.summary) <= fields.keys():
         text = Formatter().vformat(spec.summary, (), _as_mapping(fields))
     return Core(level, _clip(text), reported_value, unit)
+
+
+def _placeholders(template: str) -> set[str]:
+    return {name.split(".")[0].split("[")[0] for _, name, _, _ in Formatter().parse(template) if name}
 
 
 def _as_mapping(fields: _Fields) -> Any:

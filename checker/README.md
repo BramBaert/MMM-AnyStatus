@@ -77,10 +77,17 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   port = 3306
   ```
 
-- **`http`**: one GET. Without `json` the value is the response time in ms; an unexpected status is `crit`
-  ("HTTP 503"), a connection that fails is `unknown`. With `json = "a.b.0.c"` the value comes from the JSON answer: a
-  number, or with `value_is = "time"` a timestamp (RFC 3339 or Unix seconds; no offset means UTC unless `timezone`)
-  whose age is compared with the limits. A path that isn't there, or a value that is no number or time, is `unknown`.
+- **`http`**: one GET, never anything else: a check reads a status, it doesn't take an action. Without `json` the
+  value is the response time in ms; an unexpected status is `crit` ("HTTP 503"), a connection that fails is `unknown`.
+  With `json = "a.b.0.c"` the value comes from the JSON answer, as `value_is` says: `"number"` (default), `"time"` (a
+  timestamp, RFC 3339 or Unix seconds; no offset means UTC unless `timezone`; its age is compared) or `"seconds"` (a
+  number that already is an age or a duration). For `"time"` and `"seconds"` the limits are durations (`warn = "3d"`).
+  Instead of limits, `levels = { UP = "ok", DEGRADED = "warn", DOWN = "crit" }` names the level of each value the
+  answer may hold (text, `true`/`false`, or a number); any other value is `unknown`. A path that isn't there, a `null`,
+  or a value that is no number or time is `unknown`, unless `missing` or `null` names a level for it
+  (`null = "crit"`: "never happened" is red). **Several values from one answer** each get a table of their own,
+  `[check.values.<name>]`, with these same keys and their own limits; the check takes the worst level, and its summary
+  has a line per value that isn't green (example below). A value that can't be read then makes the whole run `unknown`.
   `expect_status` defaults to any 2xx. `username` with `password_env` is basic auth; `bearer_env` sends a bearer token.
   In the `headers` table a key ending in `_env` names the environment variable that holds the value
   (`X-Api-Key_env = "SYNC_KEY"`). TLS is verified; `verify_tls = false` is allowed and logged as a warning at startup.
@@ -97,9 +104,28 @@ with `uv add "mmm-anystatus-checker[postgres]"` or `[mysql]` for those databases
   password_env = "SYNC_PASSWORD"          # or: bearer_env = "SYNC_TOKEN"
   expect_status = [200]                    # default: any 2xx
   json = "jobs.photos.last_success"        # optional: a value from the JSON answer
-  value_is = "time"                        # "number" (default) or "time"
+  value_is = "time"                        # "number" (default), "time" or "seconds"
   warn = "2h"
   crit = "1d"
+
+  [[check]]
+  id = "backup.photos"
+  type = "http"
+  label = "Photo backup"
+  url = "http://backup.example/status?job=photos"
+
+  [check.values.age]                       # the age of the last success, in seconds; null: never
+  json = "jobs.photos.seconds_since_success"
+  value_is = "seconds"
+  null = "crit"
+  warn = "3d"
+  crit = "7d"
+
+  [check.values.successes]                 # successes in the last 30 days
+  json = "jobs.photos.successes"
+  worse = "below"
+  warn = 20
+  crit = 1
   ```
 
 - **`tls_expiry`**: `host`, `port` (443), `servername` (if it differs from `host`). The value is the days until the

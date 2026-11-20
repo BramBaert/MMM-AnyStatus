@@ -34,6 +34,21 @@ DOCUMENT = {
     "unix": 1794387600,
 }
 
+# A status API: an age in seconds per job (null: never succeeded), a count, and values that name a state
+STATUS = {
+    "jobs": {
+        "photos": {"seconds_since_success": 4 * 86400, "successes": 30},
+        "music": {"seconds_since_success": 3600, "successes": 2},
+        "new": {"seconds_since_success": None, "successes": 0},
+    },
+    "state": "UP",
+    "merged": True,
+    "count": 3,
+    "ratio": 2.5,
+    "nested": {"a": 1},
+    "secret_state": "hunter2-state",
+}
+
 
 class Handler(BaseHTTPRequestHandler):
     requests: list[dict[str, Any]]
@@ -53,6 +68,8 @@ class Handler(BaseHTTPRequestHandler):
         route = self.path.split("?")[0]
         if route == "/json":
             self.reply(200, json.dumps(DOCUMENT).encode())
+        elif route == "/status":
+            self.reply(200, json.dumps(STATUS).encode())
         elif route == "/ok":
             self.reply(200, b"fine", "text/plain")
         elif route == "/empty":
@@ -395,5 +412,154 @@ def test_verify_tls_true_and_plain_http_have_no_warning(tmp_path: Path) -> None:
     ],
 )
 def test_config_errors(tmp_path: Path, body: str, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        parse(f'[[check]]\nid = "h"\ntype = "http"\n{body}\n', tmp_path)
+
+
+# an age in seconds
+
+
+def test_value_is_seconds_is_a_duration_with_duration_limits(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    extra = 'json = "jobs.photos.seconds_since_success"\nvalue_is = "seconds"\nwarn = "3d"\ncrit = "7d"'
+    outcome, core = run(spec_for(tmp_path, f"{url}/status", extra))
+    assert isinstance(outcome, Reading) and outcome.seconds
+    assert (core.level, core.value, core.unit) == ("warn", 4.0, "d")
+    assert core.summary == "jobs.photos.seconds_since_success = 4.0 d"
+
+
+def test_value_is_seconds_with_a_summary_template(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    extra = 'json = "jobs.music.seconds_since_success"\nvalue_is = "seconds"\nsummary = "last success {age} ago"'
+    assert run(spec_for(tmp_path, f"{url}/status", extra))[1].summary == "last success 1.0 h ago"
+
+
+# null and missing
+
+
+def test_null_is_a_failure_unless_null_names_a_level(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    path = 'json = "jobs.new.seconds_since_success"\nvalue_is = "seconds"'
+    assert run(spec_for(tmp_path, f"{url}/status", path))[0] == Failure("'jobs.new.seconds_since_success' is null")
+    core = run(spec_for(tmp_path, f"{url}/status", f'{path}\nnull = "crit"'))[1]
+    assert (core.level, core.summary) == ("crit", "'jobs.new.seconds_since_success' is null")
+
+
+def test_a_summary_template_without_its_value_gives_the_types_own_text(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    extra = 'json = "jobs.new.seconds_since_success"\nvalue_is = "seconds"\nnull = "crit"\nsummary = "last success {age} ago"'
+    core = run(spec_for(tmp_path, f"{url}/status", extra))[1]
+    assert (core.level, core.summary) == ("crit", "'jobs.new.seconds_since_success' is null")
+
+
+def test_missing_is_a_failure_unless_missing_names_a_level(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    assert run(spec_for(tmp_path, f"{url}/status", 'json = "jobs.gone.successes"'))[0] == Failure("'jobs.gone.successes' not found")
+    core = run(spec_for(tmp_path, f"{url}/status", 'json = "jobs.gone.successes"\nmissing = "warn"'))[1]
+    assert (core.level, core.summary) == ("warn", "'jobs.gone.successes' not found")
+
+
+# levels
+
+
+@pytest.mark.parametrize(
+    ("path", "levels", "level", "summary"),
+    [
+        ("state", '{ UP = "ok", DOWN = "crit" }', "ok", "state = UP"),
+        ("merged", '{ true = "warn", false = "ok" }', "warn", "merged = true"),
+        ("count", '{ 3 = "crit" }', "crit", "count = 3"),
+        ("ratio", '{ "2.5" = "warn" }', "warn", "ratio = 2.5"),
+    ],
+)
+def test_levels_name_the_level_of_a_value(server: tuple[str, list], tmp_path: Path, path: str, levels: str, level: str, summary: str) -> None:
+    url, _ = server
+    outcome, core = run(spec_for(tmp_path, f"{url}/status", f'json = "{path}"\nlevels = {levels}'))
+    assert isinstance(outcome, Observation)
+    assert (core.level, core.summary) == (level, summary)
+
+
+def test_a_value_levels_does_not_name_is_unknown_and_stays_out_of_the_summary(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    core = run(spec_for(tmp_path, f"{url}/status", 'json = "secret_state"\nlevels = { UP = "ok" }'))[1]
+    assert core.level == "unknown"
+    assert "hunter2" not in (core.summary or "")
+
+
+def test_levels_on_an_object_is_a_failure(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    outcome = run(spec_for(tmp_path, f"{url}/status", 'json = "nested"\nlevels = { UP = "ok" }'))[0]
+    assert outcome == Failure("'nested' is not a single value")
+
+
+# several named values
+
+
+VALUES = """
+[check.values.age]
+json = "jobs.{job}.seconds_since_success"
+value_is = "seconds"
+null = "crit"
+warn = "3d"
+crit = "7d"
+
+[check.values.successes]
+json = "jobs.{job}.successes"
+worse = "below"
+warn = 20
+crit = 1
+"""
+
+
+def test_values_the_worst_decides_and_each_non_ok_value_has_a_line(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    core = run(spec_for(tmp_path, f"{url}/status", VALUES.format(job="music")))[1]
+    # age 1 h is ok, 2 successes is amber
+    assert (core.level, core.value, core.unit) == ("warn", 2.0, None)
+    assert core.summary == "successes: jobs.music.successes = 2"
+
+
+def test_values_all_ok_lists_every_value(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    text = VALUES.format(job="photos").replace('warn = "3d"\ncrit = "7d"', 'warn = "5d"\ncrit = "7d"')
+    core = run(spec_for(tmp_path, f"{url}/status", text))[1]
+    assert core.level == "ok"
+    assert core.summary == "age: jobs.photos.seconds_since_success = 4.0 d\nsuccesses: jobs.photos.successes = 30"
+
+
+def test_values_a_null_named_as_crit_counts_as_crit(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    core = run(spec_for(tmp_path, f"{url}/status", VALUES.format(job="new")))[1]
+    assert core.level == "crit"
+    assert core.summary == "age: 'jobs.new.seconds_since_success' is null\nsuccesses: jobs.new.successes = 0"
+
+
+def test_values_one_that_cannot_be_read_makes_the_run_a_failure(server: tuple[str, list], tmp_path: Path) -> None:
+    url, _ = server
+    outcome = run(spec_for(tmp_path, f"{url}/status", VALUES.format(job="gone")))[0]
+    assert outcome == Failure("age: 'jobs.gone.seconds_since_success' not found")
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ('url = "https://x.example/"\njson = "a"\nvalue_is = "seconds"\nwarn = "1d"\ncrit = "2h"', "limits are out of order"),
+        ('url = "https://x.example/"\nnull = "crit"', "'null' needs 'json'"),
+        ('url = "https://x.example/"\njson = "a"\nnull = "red"', "'null' must be one of"),
+        ('url = "https://x.example/"\njson = "a"\nmissing = "red"', "'missing' must be one of"),
+        ('url = "https://x.example/"\njson = "a"\nlevels = {}', "'levels' is empty"),
+        ('url = "https://x.example/"\njson = "a"\nlevels = { UP = "green" }', "not one of"),
+        ('url = "https://x.example/"\njson = "a"\nlevels = { UP = 1 }', "'levels' must be a table of text values"),
+        ('url = "https://x.example/"\njson = "a"\nlevels = { UP = "ok" }\nvalue_is = "time"', "'levels' and 'value_is'"),
+        ('url = "https://x.example/"\njson = "a"\nlevels = { UP = "ok" }\nwarn = 1', "names the level itself"),
+        ('url = "https://x.example/"\nvalues = 5', "'values' must be named tables"),
+        ('url = "https://x.example/"\njson = "a"\n[check.values.b]\njson = "b"', "go in each value"),
+        ('url = "https://x.example/"\nwarn = 5\n[check.values.b]\njson = "b"', "go in each value"),
+        ('url = "https://x.example/"\n[check.values.b]\nvalue_is = "time"', "value 'b': missing 'json'"),
+        ('url = "https://x.example/"\n[check.values.b]\njson = "b"\nwarn = 5\ncrit = 1', "value 'b': limits are out of order"),
+        ('url = "https://x.example/"\n[check.values.b]\njson = "b"\nwarn = "2h"', "value 'b': 'warn' must be a number"),
+        ('url = "https://x.example/"\n[check.values.b]\njson = "b"\nlabel = "x"', "value 'b': unknown key 'label'"),
+    ],
+)
+def test_value_config_errors(tmp_path: Path, body: str, message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         parse(f'[[check]]\nid = "h"\ntype = "http"\n{body}\n', tmp_path)

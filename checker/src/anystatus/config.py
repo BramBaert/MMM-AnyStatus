@@ -11,7 +11,7 @@ from string import Formatter
 from typing import Any
 
 from anystatus.checks import REGISTRY, SECTIONS, Check
-from anystatus.model import ID_PATTERN, ShowAfter, Worse
+from anystatus.model import ID_PATTERN, Limits, ShowAfter
 from anystatus.table import ConfigError, Context, Table
 from anystatus.timeutil import format_wait, parse_wait
 
@@ -21,13 +21,6 @@ SHOW_AFTER_LEVELS = ("warn", "crit", "unknown")
 DEFAULT_LISTEN = "127.0.0.1:8099"
 DEFAULT_STATE = "anystatus.sqlite"
 GENERIC_PLACEHOLDERS = frozenset({"value", "unit"})
-
-
-@dataclass(frozen=True)
-class Limits:
-    warn: float | None
-    crit: float | None
-    worse: Worse
 
 
 @dataclass(frozen=True)
@@ -222,13 +215,7 @@ def _build_check(
         return None
 
     traits = check_cls.traits(t)
-    warn_default, crit_default = traits.default_limits
-    warn = t.limit("warn", warn_default, traits.duration_limits)
-    crit = t.limit("crit", crit_default, traits.duration_limits)
-    worse: Worse = "below" if t.choice("worse", ("above", "below"), traits.worse) == "below" else "above"
-    if warn is not None and crit is not None and (warn >= crit if worse == "above" else warn <= crit):
-        order = "warn < crit" if worse == "above" else "warn > crit"
-        t.error(f'limits are out of order for worse = "{worse}": need {order}, got warn = {warn:g}, crit = {crit:g}')
+    limits = t.limits(traits.default_limits, traits.duration_limits, traits.worse)
 
     if summary is not None:
         _check_template(
@@ -253,7 +240,7 @@ def _build_check(
         timeout=timeout,
         ttl=ttl,
         show_after=show_after,
-        limits=Limits(warn, crit, worse),
+        limits=limits,
         summary=summary,
         check=check,
         secrets=tuple(t.secrets),

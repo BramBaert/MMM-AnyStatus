@@ -197,7 +197,7 @@ in milliseconds. CI runs on Python 3.11 and 3.14.
 | `ttl` | 3 × `interval` | |
 | `show_after` | `[defaults]` per level, else at once | see [`show_after`](#show_after-how-long-a-level-must-last-before-it-shows) |
 | `warn`, `crit`, `worse` | per type | see [Limits](#limits); some types have default limits |
-| `summary` | per type | a template replacing the type's own text: `"last backup {age} ago"`. Placeholders: `{value}`, `{unit}`, `{age}` (a duration, written as "3.1 d") and the type's own (listed per type) |
+| `summary` | per type | a template replacing the type's own text: `"last backup {age} ago"`. Placeholders: `{value}`, `{unit}`, `{age}` (a duration, written as "3.1 d") and the type's own (listed per type). A run that has no value for a placeholder the template names (`sql_age`'s "no rows", a `null` that `http`'s `null` turns red) shows the type's own text instead |
 
 **Durations as values** (ages, `sql_age`, `file_age`) are compared in seconds but reported in the largest unit that
 fits, one decimal: `3.1` `d`, `5.0` `h`, `12.0` `min`. Limits on them are written as durations: `warn = "26h"`.
@@ -213,7 +213,7 @@ the container itself.
 | `sql_age` | age of a timestamp | above | none | driver extra for MariaDB/MySQL/PostgreSQL | 3 |
 | `python` | your function's | your function's | none | | 3 |
 | `tcp` | connect time, ms | above | none; refused is `crit` | | 4 |
-| `http` | response time, or a value from the JSON | above | none; a wrong status is `crit` | | 4 |
+| `http` | response time, or values from the JSON (number, time, age, or a level by `levels`) | above | none; a wrong status is `crit` | | 4 |
 | `tls_expiry` | days until expiry | below | warn 21 d, crit 7 d | | 4 |
 | `sql_value` | a number from a query | above | none | as `sql_age` | 4 |
 | `file_age` | age of the newest matching file | above | none; no file is `crit` | | 4 |
@@ -277,18 +277,70 @@ username = "monitor"
 password_env = "SYNC_PASSWORD"          # or: bearer_env = "SYNC_TOKEN"
 expect_status = [200]                    # default: any 2xx
 json = "jobs.photos.last_success"        # optional: a value from the JSON answer
-value_is = "time"                        # "number" (default) or "time": the value is a timestamp, its age is compared
+value_is = "time"                        # "number" (default), "time" (a timestamp: its age) or "seconds" (an age)
 warn = "2h"
 crit = "1d"
 ```
+
+**Only `GET`.** MMM-AnyStatus reports a status; a `POST` is an action, and a check never takes one. An API that only
+answers a read over `POST` needs a `GET` of its own, or a `python` check.
 
 Without `json`, the value is the response time in ms and the check is mostly about the status code. **An unexpected
 status is `crit`** ("HTTP 503"), a connection that fails is `unknown`.
 
 - `json` is a dotted path, with list indices as numbers (`items.0.age`).
-- A missing path, or a value that isn't a number or a time, is a failure: the API changed, so the check can't tell.
+- A missing path, `null`, or a value that isn't a number or a time is a failure: the API changed, so the check can't
+  tell. **Unless the config says what it means:** `missing = "crit"` and `null = "crit"` (any level) turn it into that
+  level ("'jobs.new.age' is null"). An API that writes `null` for "never happened" is the case for `null`.
 - `value_is = "time"` accepts RFC 3339 strings and Unix seconds. A time without an offset is read as UTC unless
   `timezone = "Europe/Brussels"`.
+- `value_is = "seconds"`: the number already is an age or a duration (`uptime_seconds`, `seconds_since_success`).
+  Compared as seconds, shown in the largest unit that fits ("4.0 d"), limits written as durations, as for `"time"`.
+- **`levels`** instead of limits: `levels = { UP = "ok", DEGRADED = "warn", DOWN = "crit" }`, the same key as `mqtt`'s.
+  The value is matched as text: a string as it is, `true`/`false`, a number as written (`3`, `2.5`). A value the table
+  doesn't name is `unknown` ("'state' has a value that 'levels' doesn't name"), **without the value**: only values
+  the config itself wrote appear in a summary ("state = UP"). An object or a list is a failure. `levels` excludes
+  `value_is`, `warn`, `crit` and `worse`.
+
+**Several values from one answer** (`[check.values.<name>]`), when one thing a person recognises has more than one
+number worth judging, as `docker_status` judges each container and `image_vulns` each CVE:
+
+```toml
+[[check]]
+id = "backup.photos"
+type = "http"
+label = "Photo backup"
+url = "http://backup.example/status?job=photos"
+
+[check.values.age]
+json = "jobs.photos.seconds_since_success"
+value_is = "seconds"
+null = "crit"
+warn = "3d"
+crit = "7d"
+
+[check.values.successes]
+json = "jobs.photos.successes"
+worse = "below"
+warn = 20
+crit = 1
+```
+
+- Each value has the keys of the single form (`json`, required, `value_is`, `timezone`, `levels`, `null`, `missing`)
+  and its own `warn`, `crit` and `worse`. Unknown keys in a value are errors, as everywhere.
+- **The worst level is the check's level**; its value and unit are those of the first value with that level, in the
+  config's order.
+- The summary has one line per value that isn't `ok` ("successes: jobs.photos.successes = 2"); when all are `ok`, one
+  line per value.
+- **A value that can't be read makes the whole run a failure** ("age: 'jobs.photos.x' not found"), and so does a
+  value that `levels` doesn't name. A value the check can't judge is the API having changed, and a level built from
+  the rest would hide that.
+- `show_after`, `ttl` and `summary` are the check's, applied to the combined result. In a `summary` template,
+  `{value}` and `{unit}` are those of the deciding value; `{status}`, `{ms}` and `{age}` have no value there, so a
+  template that names one shows the type's own text instead.
+- The single form and `values` don't mix: with `values`, `json`, its keys and the limits go in each value.
+- No wildcards (`jobs.*.age`): a value is named, so a new job doesn't silently join a check, and each value says
+  which it is.
 - TLS is verified; `verify_tls = false` is allowed but logged as a warning at startup.
 - Extra headers: a `headers` table. A key ending in `_env` takes its value from the environment, like every other
   key (`X-Api-Key_env = "SYNC_KEY"` sends `X-Api-Key`).

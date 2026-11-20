@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from anystatus.model import Limits, Worse
 from anystatus.timeutil import load_timezone, parse_duration
 
 _MISSING = object()
@@ -180,6 +181,16 @@ class Table:
                 return default
         self.error(f"'{key}' must be a number" + (' or a duration such as "26h"' if as_duration else ""))
         return default
+
+    def limits(self, defaults: tuple[float | None, float | None], as_duration: bool, worse_default: Worse) -> Limits:
+        """`warn`, `crit` and `worse`, with `warn` and `crit` in order for the direction."""
+        warn = self.limit("warn", defaults[0], as_duration)
+        crit = self.limit("crit", defaults[1], as_duration)
+        worse: Worse = "below" if self.choice("worse", ("above", "below"), worse_default) == "below" else "above"
+        if warn is not None and crit is not None and (warn >= crit if worse == "above" else warn <= crit):
+            order = "warn < crit" if worse == "above" else "warn > crit"
+            self.error(f'limits are out of order for worse = "{worse}": need {order}, got warn = {warn:g}, crit = {crit:g}')
+        return Limits(warn, crit, worse)
 
     def choice(self, key: str, options: Sequence[str], default: str) -> str:
         value = self._take(key)
